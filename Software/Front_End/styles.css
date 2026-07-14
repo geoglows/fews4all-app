@@ -1,0 +1,25 @@
+/* Styling now lives in Tailwind utility classes (see index.html + app.js).
+ * This file only holds things Tailwind utilities can't cleanly express:
+ * base sizing, Leaflet overrides, and a Preflight fix for map tiles.
+ */
+
+html, body { height: 100%; margin: 0; }
+
+/* A Tailwind display utility (e.g. `flex`) otherwise beats the [hidden]
+ * attribute; keep hidden authoritative so JS toggling works. */
+[hidden] { display: none !important; }
+
+/* Tailwind Preflight resets <img> (max-width:100%), which breaks Leaflet
+ * tiles/markers. Restore their natural sizing. */
+.leaflet-container img { max-width: none !important; }
+
+/* Remove the browser focus outline (blue box) on a clicked basin */
+.leaflet-interactive:focus { outline: none; }
+
+/* Leaflet popup + tooltip font size */
+.leaflet-popup-content,
+.leaflet-tooltip { font-size: 13px; }
+
+/* Side-panel scrollbar (light, to match the white panel) */
+#panel::-webkit-scrollbar { width: 9px; }
+#panel::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 6px; }
