@@ -27,7 +27,7 @@ OUTPUT = os.path.join(FRONT_END, "data.geojson")
 BASIN_LEVEL = 12
 
 SEVERITY_RANK = {
-    "none": 0, "minor": 1, "moderate": 2, "major": 3, "severe": 4, "extreme": 5,
+    "none": 0, "warning": 1, "danger": 2, "extreme": 3,
 }
 
 

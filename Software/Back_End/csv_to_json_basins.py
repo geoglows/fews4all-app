@@ -24,7 +24,7 @@ REQUIRED_COLUMNS = [
 ]
 
 SEVERITY_RANK = {
-    "none": 0, "minor": 1, "moderate": 2, "major": 3, "severe": 4, "extreme": 5,
+    "none": 0, "warning": 1, "danger": 2, "extreme": 3,
 }
 
 TEXT_FIELDS = [
@@ -48,8 +48,8 @@ FLOOD_HUB_SIGNATURE = {"gaugeId", "queriedCountryName"}
 
 FLOOD_HUB_SEVERITY = {
     "NO_FLOODING": "none",
-    "ABOVE_NORMAL": "minor",
-    "SEVERE": "severe",
+    "ABOVE_NORMAL": "warning",
+    "SEVERE": "danger",
     "EXTREME": "extreme",
     "UNKNOWN": "",
 }

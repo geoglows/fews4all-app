@@ -13,29 +13,29 @@ import json
 import os
 import sys
 
-INPUT_CSVS = ["../../Flood_Hub_Global.csv", "../../Geoglows_2024-04-01-00.csv"]
+INPUT_CSVS = ["../../Flood_Hub_Global.csv", "../../Geoglows_2026-07-13-00.csv"]
 OUTPUT = "../../flood_points.json"
 
+# Flood Hub interpretation: three tiers by return period.
 FLOOD_HUB_SEVERITY = {
-    "UNKNOWN": "none",
-    "NO_FLOODING": "none",
-    "ABOVE_NORMAL": "minor",
-    "SEVERE": "severe",
+    "ABOVE_NORMAL": "warning",
+    "SEVERE": "danger",
     "EXTREME": "extreme",
 }
 
-# GEOGLOWS has no severity, only ret_per (years). Assumed map; ret_per not listed
-# here is skipped. Uncomment entries to include more return periods.
-GEOGLOWS_RETPER_SEVERITY = {
-    #5: "minor",
-    #10: "moderate",
-    #25: "major",
-    #50: "severe",
-    100: "extreme",
-}
+# GEOGLOWS has no severity, only ret_per (years). Same interpretation:
+# >=20-yr = extreme, >=5-yr = danger, >=2-yr = warning; below 2-yr not shown.
+GEOGLOWS_SEVERITY_THRESHOLDS = [(20, "extreme"), (5, "danger"), (2, "warning")]
 
 # Minimum GEOGLOWS mean flow (m³/s) to keep; 0 keeps everything.
-GEOGLOWS_MIN_MEAN_FLOW = 10
+GEOGLOWS_MIN_MEAN_FLOW = 5
+
+
+def geoglows_severity(ret_per):
+    for thr, sev in GEOGLOWS_SEVERITY_THRESHOLDS:
+        if ret_per >= thr:
+            return sev
+    return None
 
 FLOOD_HUB_SIGNATURE = {"gaugeId", "queriedCountryName", "gaugeLocation.latitude"}
 GEOGLOWS_SIGNATURE = {"comid", "ret_per", "lat", "lon"}
@@ -112,7 +112,8 @@ def adapt_geoglows(rows):
             rp = int(float(rp_raw))
         except (TypeError, ValueError):
             rp = 0
-        if rp not in GEOGLOWS_RETPER_SEVERITY:
+        sev = geoglows_severity(rp)
+        if sev is None:
             continue
         mean_flow = _float_or_none(r.get("mean"))
         if GEOGLOWS_MIN_MEAN_FLOW and (mean_flow is None
@@ -126,7 +127,7 @@ def adapt_geoglows(rows):
             continue
         out.append({
             "model": "geoglows",
-            "severity": GEOGLOWS_RETPER_SEVERITY[rp],
+            "severity": sev,
             "lat": lat,
             "lon": lon,
             "riverId": _clean(r.get("comid")),
