@@ -1,40 +1,17 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en" class="h-full">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <title>FEWS Share · Grid</title>
-
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            nav: "#81d4fa",
-            panel: "#FEFDFD",
-          },
-        },
-      },
-    };
-  </script>
-
-  <script src="https://code.iconify.design/iconify-icon/2.1.0/iconify-icon.min.js"></script>
-
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-    crossorigin=""
-  />
-  <link rel="stylesheet" href="styles.css" />
 </head>
 <body class="h-full">
   <div id="app" class="flex flex-col h-screen">
 
     <header id="topbar" class="flex items-center justify-between gap-4 h-[70px] px-4 bg-nav border-b border-sky-700/30 shrink-0">
       <div class="flex items-center gap-4 min-w-0">
-        <img src="geoglows-logo-nav.png" alt="GEOGLOWS" class="h-8 w-auto shrink-0" />
+        <img src="https://d3hbj0z0f67zhd.cloudfront.net/static/images/geoglows-logo-nav.png" alt="GEOGLOWS" class="h-8 w-auto shrink-0" />
         <div class="min-w-0">
           <h1 class="text-black font-bold text-base leading-tight">FEWS Share</h1>
           <p class="text-slate-800/80 text-xs truncate">Multi-Model Global Flood Early Warning System</p>
@@ -60,12 +37,6 @@
     </main>
   </div>
 
-  <script
-    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-    crossorigin=""
-  ></script>
-
-  <script src="app.js"></script>
+  <script type="module" src="/src/main.js"></script>
 </body>
 </html>

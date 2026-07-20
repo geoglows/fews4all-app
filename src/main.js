@@ -1,18 +1,16 @@
-/* app.js — renders flagged grid cells (or basins) on a Leaflet map and shows each
- * model's forecast when a cell is clicked, with zoom-driven resolution telescoping.
- *
- * In:  data.geojson (fetched) — one FeatureCollection, features tagged with `res`.
- * Out: the interactive map that index.html mounts.
- * Serve via a local server (VS Code "Go Live"); fetch() is blocked on file://.
- */
+// Entry point. Vite bundles these imports — no CDN <script>/<link> tags needed.
+import "./style.css" // Tailwind + custom theme + Leaflet overrides
+import "leaflet/dist/leaflet.css" // Leaflet's own stylesheet (from npm)
+import "iconify-icon" // registers the <iconify-icon> web component
+import L from "leaflet";
 
 (function () {
   "use strict";
 
   const SEVERITY = {
-    warning: { rank: 1, color: "#ffd21f", label: "Warning" },
-    danger:  { rank: 2, color: "#ff8c00", label: "Danger" },
-    extreme: { rank: 3, color: "#e0201b", label: "Extreme" },
+    warning: {rank: 1, color: "#ffd21f", label: "Warning"},
+    danger: {rank: 2, color: "#ff8c00", label: "Danger"},
+    extreme: {rank: 3, color: "#e0201b", label: "Extreme"},
   };
   const DEFAULT_COLOR = "#4da3ff";
 
@@ -67,7 +65,7 @@
     return String(val);
   }
 
-  const map = L.map("map", { zoomControl: true, minZoom: 2, maxZoom: 20 });
+  const map = L.map("map", {zoomControl: true, minZoom: 2, maxZoom: 20});
   map.setView([20, 0], 2);
 
   const googleAttr = "Imagery &copy; Google · Grid: H3 (Uber H3)";
@@ -87,9 +85,9 @@
   };
 
   baseLayers["Google Hybrid"].addTo(map);
-  L.control.layers(baseLayers, null, { position: "topright", collapsed: false }).addTo(map);
+  L.control.layers(baseLayers, null, {position: "topright", collapsed: false}).addTo(map);
 
-  const resControl = L.control({ position: "bottomleft" });
+  const resControl = L.control({position: "bottomleft"});
   resControl.onAdd = function () {
     const div = L.DomUtil.create("div", "");
     div.style.cssText =
@@ -100,6 +98,7 @@
     return div;
   };
   resControl.addTo(map);
+
   function updateResReadout(res) {
     const el = document.getElementById("res-readout");
     if (el) el.textContent = "H3 res " + res;
@@ -107,11 +106,11 @@
 
   const legendEl = document.getElementById("legend");
   legendEl.innerHTML = Object.keys(SEVERITY)
-    .filter((k) => k !== "none")
-    .map((k) => `<span class="flex items-center gap-1.5 text-xs font-semibold text-slate-800">
+      .filter((k) => k !== "none")
+      .map((k) => `<span class="flex items-center gap-1.5 text-xs font-semibold text-slate-800">
         <span class="w-3.5 h-3.5 rounded-sm border border-black/30" style="background:${SEVERITY[k].color}"></span>${SEVERITY[k].label}
       </span>`)
-    .join("") +
+      .join("") +
     `<span class="flex items-center gap-1.5 text-xs font-semibold text-slate-800">
         <span class="w-3.5 h-3.5 rounded-sm bg-white border-2 border-slate-900"></span>Multi-model
       </span>`;
@@ -206,19 +205,25 @@
 
   // ---- Model filter (toggle at the top of the panel) ------------------------
   const visibleModels = new Set();
-  const MODEL_LABELS = { flood_hub: "Flood Hub", geoglows: "GEOGLOWS" };
+  const MODEL_LABELS = {flood_hub: "Flood Hub", geoglows: "GEOGLOWS"};
+
   function modelLabel(m) {
     return MODEL_LABELS[m] || m.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
   }
+
   function worstSeverity(forecasts) {
     let best = "", bestRank = -1;
     for (const fc of forecasts) {
       const info = SEVERITY[(fc.severity || "").toLowerCase()];
       const r = info ? info.rank : -1;
-      if (r > bestRank) { bestRank = r; best = (fc.severity || "").toLowerCase(); }
+      if (r > bestRank) {
+        bestRank = r;
+        best = (fc.severity || "").toLowerCase();
+      }
     }
     return best;
   }
+
   // Keep only forecasts from visible models; drop empty cells; recolour the rest.
   function visibleFeatures(features) {
     const out = [];
@@ -244,12 +249,13 @@
     // Colour = severity; outline = model agreement. Multi-model cells get a bold
     // dark ring + more opaque fill so higher-confidence areas stand out.
     if (p.agree) {
-      return { color: "#0f172a", weight: 2.5, opacity: 1, fillColor: c, fillOpacity: 0.6 };
+      return {color: "#0f172a", weight: 2.5, opacity: 1, fillColor: c, fillOpacity: 0.6};
     }
-    return { color: c, weight: 1, opacity: 0.85, fillColor: c, fillOpacity: 0.32 };
+    return {color: c, weight: 1, opacity: 0.85, fillColor: c, fillOpacity: 0.32};
   }
-  const HOVER_STYLE = { weight: 3, fillOpacity: 0.6 };
-  const SELECT_STYLE = { weight: 4, fillOpacity: 0.6, color: "#ffffff" };
+
+  const HOVER_STYLE = {weight: 3, fillOpacity: 0.6};
+  const SELECT_STYLE = {weight: 4, fillOpacity: 0.6, color: "#ffffff"};
 
   let selected = null;
   let selectedGroup = null;
@@ -267,11 +273,15 @@
     lyr.bindTooltip(
       `${unitLabel(p)} ${p.cell_id} · <b>${p.severity || "?"}</b> (${p.model_count} forecast${p.model_count === 1 ? "" : "s"})` +
       (p.agree ? ` · ✓ ${p.models.length} models` : ""),
-      { sticky: true }
+      {sticky: true}
     );
     lyr.on({
-      mouseover: () => { if (lyr !== selected) lyr.setStyle(HOVER_STYLE); },
-      mouseout: () => { if (lyr !== selected) getGroup().resetStyle(lyr); },
+      mouseover: () => {
+        if (lyr !== selected) lyr.setStyle(HOVER_STYLE);
+      },
+      mouseout: () => {
+        if (lyr !== selected) getGroup().resetStyle(lyr);
+      },
       click: (e) => {
         L.DomEvent.stopPropagation(e);
         if (selected && selectedGroup) selectedGroup.resetStyle(selected);
@@ -279,7 +289,7 @@
         selectedGroup = getGroup();
         lyr.setStyle(SELECT_STYLE);
         showCell(p);
-        map.fitBounds(lyr.getBounds(), { maxZoom: 12, padding: [40, 40] });
+        map.fitBounds(lyr.getBounds(), {maxZoom: 12, padding: [40, 40]});
       },
     });
   }
@@ -290,7 +300,7 @@
     if (layers[res]) return layers[res];
     let group;
     group = L.geoJSON(
-      { type: "FeatureCollection", features: visibleFeatures(byRes[String(res)].features) },
+      {type: "FeatureCollection", features: visibleFeatures(byRes[String(res)].features)},
       {
         style: baseStyle,
         onEachFeature: (feature, lyr) => bindFeature(feature, lyr, () => group),
@@ -324,14 +334,20 @@
   function refreshLayers() {
     for (const k in layers) delete layers[k];
     const res = currentRes;
-    if (activeLayer) { map.removeLayer(activeLayer); activeLayer = null; }
+    if (activeLayer) {
+      map.removeLayer(activeLayer);
+      activeLayer = null;
+    }
     currentRes = null;
     if (res != null) showRes(res);
   }
 
   function renderModelToggle(models) {
     const el = document.getElementById("model-toggle");
-    if (!el || models.length < 2) { if (el) el.innerHTML = ""; return; }
+    if (!el || models.length < 2) {
+      if (el) el.innerHTML = "";
+      return;
+    }
     el.innerHTML =
       '<div class="relative mb-3 pb-3 border-b border-slate-200">' +
       '  <button id="model-dd-btn" type="button" class="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-slate-300 bg-white text-[13px] font-medium text-slate-700 hover:bg-slate-50">' +
@@ -356,16 +372,20 @@
       label.textContent = n === models.length ? "All models"
         : n === 0 ? "No models" : n + " of " + models.length + " models";
     }
+
     function closeMenu() {
       menu.classList.add("hidden");
       caret.style.transform = "";
     }
+
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       const open = menu.classList.toggle("hidden");
       caret.style.transform = open ? "" : "rotate(180deg)";
     });
-    document.addEventListener("click", (e) => { if (!root.contains(e.target)) closeMenu(); });
+    document.addEventListener("click", (e) => {
+      if (!root.contains(e.target)) closeMenu();
+    });
 
     el.querySelectorAll("input[type=checkbox]").forEach((cb) => {
       cb.addEventListener("change", () => {
@@ -389,7 +409,7 @@
       ? geo.resolutions.map(Number)
       : Object.keys(grouped).map(Number)).sort((a, b) => a - b);
     for (const r of resolutions) {
-      byRes[String(r)] = { type: "FeatureCollection", features: grouped[r] || [] };
+      byRes[String(r)] = {type: "FeatureCollection", features: grouped[r] || []};
     }
 
     if (!resolutions.some((r) => byRes[String(r)].features.length)) {
@@ -417,11 +437,12 @@
     map.on("click", clearSelection);
 
     showRes(resolutions[0]);
-    map.fitBounds(activeLayer.getBounds(), { padding: [40, 40], maxZoom: 6 });
+    map.fitBounds(activeLayer.getBounds(), {padding: [40, 40], maxZoom: 6});
     showRes(zoomToRes(map.getZoom()));
   }
 
-  fetch("data.geojson")
+  // data_basins.geojson or data_hexagons.geojson
+  fetch("https://d3hbj0z0f67zhd.cloudfront.net/fews4all/data_basins.geojson")
     .then((r) => {
       if (!r.ok) throw new Error("HTTP " + r.status);
       return r.json();
@@ -429,9 +450,6 @@
     .then(buildFromGeojson)
     .catch((err) => {
       document.getElementById("panel-empty").innerHTML =
-        "<h2>Couldn't load data.geojson</h2><p>" + String(err) + "</p>" +
-        "<p>Open this page through a local server (VS Code “Go Live”), not by " +
-        "double-clicking the file — browsers block <code>fetch()</code> on " +
-        "<code>file://</code>.</p>";
+        "<strong>Error obtain";
     });
 })();

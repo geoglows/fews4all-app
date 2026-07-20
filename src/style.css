@@ -1,7 +1,12 @@
-/* Styling now lives in Tailwind utility classes (see index.html + app.js).
- * This file only holds things Tailwind utilities can't cleanly express:
- * base sizing, Leaflet overrides, and a Preflight fix for map tiles.
- */
+@import "tailwindcss";
+
+@theme {
+  --color-nav: #81d4fa;
+  --color-panel: #fefdfd;
+}
+
+/* Everything below is what Tailwind utilities can't cleanly express: base
+ * sizing, Leaflet overrides, and a Preflight fix for map tiles. */
 
 html, body { height: 100%; margin: 0; }
 
