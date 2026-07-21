@@ -27,7 +27,7 @@ import L from "leaflet";
     ["riverId", "Gauge / River ID"],
     ["country", "Country"],
     ["returnPeriodYr", "Return period"],
-    ["peakDischargeCms", "Peak discharge"],
+    ["peakDischargeCms", "Mean discharge"], //this will need to be changed into peak, the info from geoglows is in mean discharge.
     ["issuedTime", "Issued"],
     ["startTime", "Start"],
     ["peakTime", "Peak"],
@@ -35,9 +35,48 @@ import L from "leaflet";
     ["historicalComparison", "Historical"],
   ];
 
-  // Basin builds tag features with basin_id; grid builds don't. Label accordingly.
+  // Every pipeline stamps the FeatureCollection with a `kind`, so all the
+  // user-facing wording (readout, attribution, panel copy) comes from one place
+  // instead of being hardcoded to H3.
+  const DATASETS = {
+    "basins-telescoping": {
+      unit: "Basin",
+      resLabel: "Basin level",
+      attribution: "HydroBASINS",
+      emptyTitle: "No basin selected",
+      emptyBody: "Click a highlighted basin on the map to see every forecast inside it.",
+      pipeline: ["csv_to_json_basins.py", "build_basins.py"],
+    },
+    "h3-telescoping": {
+      unit: "Cell",
+      resLabel: "H3 res",
+      attribution: "Grid: H3 (Uber H3)",
+      emptyTitle: "No cell selected",
+      emptyBody: "Click a highlighted grid cell on the map to see every forecast inside it.",
+      pipeline: ["csv_to_json_vgrid.py", "build_cells_h3.py"],
+    },
+    "s2-telescoping": {
+      unit: "Cell",
+      resLabel: "S2 level",
+      attribution: "Grid: S2 (Google S2)",
+      emptyTitle: "No cell selected",
+      emptyBody: "Click a highlighted grid cell on the map to see every forecast inside it.",
+      pipeline: ["csv_to_json_vgrid.py", "build_cells_s2.py"],
+    },
+  };
+
+  // Until the data lands we don't know which build it is; stay neutral.
+  let dataset = {
+    unit: "Area", resLabel: "Level", attribution: "",
+    emptyTitle: "No area selected",
+    emptyBody: "Click a highlighted area on the map to see every forecast inside it.",
+    pipeline: ["csv_to_json_vgrid.py", "build_cells_h3.py"],
+  };
+
   function unitLabel(props) {
-    return props && props.basin_id ? "Basin" : "Cell";
+    // Fall back to the per-feature tag if a file predates the `kind` member.
+    if (props && props.basin_id && dataset.unit === "Area") return "Basin";
+    return dataset.unit;
   }
 
   // Compact counts for the impact tiles: 8_181_280 -> "8.2M".
@@ -68,7 +107,10 @@ import L from "leaflet";
   const map = L.map("map", {zoomControl: true, minZoom: 2, maxZoom: 20});
   map.setView([20, 0], 2);
 
-  const googleAttr = "Imagery &copy; Google · Grid: H3 (Uber H3)";
+  // Tile layers carry only their own imagery credit. The grid/basin credit is a
+  // separate attribution entry so it survives base-layer switches and can be
+  // swapped once we know what the data actually is.
+  const googleAttr = "Imagery &copy; Google";
   const googleSub = ["mt0", "mt1", "mt2", "mt3"];
 
   const baseLayers = {
@@ -80,9 +122,18 @@ import L from "leaflet";
     }),
     "OpenStreetMap": L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 19,
-      attribution: "&copy; OpenStreetMap contributors · Grid: H3",
+      attribution: "&copy; OpenStreetMap contributors",
     }),
   };
+
+  let gridAttribution = null;
+
+  function setGridAttribution(text) {
+    if (!map.attributionControl) return;
+    if (gridAttribution) map.attributionControl.removeAttribution(gridAttribution);
+    gridAttribution = text || null;
+    if (gridAttribution) map.attributionControl.addAttribution(gridAttribution);
+  }
 
   baseLayers["Google Hybrid"].addTo(map);
   L.control.layers(baseLayers, null, {position: "topright", collapsed: false}).addTo(map);
@@ -94,14 +145,14 @@ import L from "leaflet";
       "background:rgba(255,255,255,.92);padding:3px 9px;border-radius:6px;" +
       "font:600 12px system-ui,sans-serif;color:#0f172a;box-shadow:0 1px 4px rgba(0,0,0,.35)";
     div.id = "res-readout";
-    div.textContent = "H3 res —";
+    div.textContent = dataset.resLabel + " —";
     return div;
   };
   resControl.addTo(map);
 
   function updateResReadout(res) {
     const el = document.getElementById("res-readout");
-    if (el) el.textContent = "H3 res " + res;
+    if (el) el.textContent = dataset.resLabel + " " + res;
   }
 
   const legendEl = document.getElementById("legend");
@@ -399,6 +450,10 @@ import L from "leaflet";
   }
 
   function buildFromGeojson(geo) {
+    // Resolve the wording before anything renders.
+    if (geo && DATASETS[geo.kind]) dataset = DATASETS[geo.kind];
+    setGridAttribution(dataset.attribution);
+
     const feats = (geo && geo.features) || [];
     const grouped = {};
     for (const f of feats) {
@@ -414,17 +469,16 @@ import L from "leaflet";
 
     if (!resolutions.some((r) => byRes[String(r)].features.length)) {
       document.getElementById("panel-empty").innerHTML =
-        "<h2>No cell data</h2><p>Run <code>python csv_to_json_vgrid.py</code> then " +
-        "<code>python build_cells_h3.py</code> to generate <code>data.geojson</code>.</p>";
+        `<h2>No ${dataset.unit.toLowerCase()} data</h2><p>Run ` +
+        `<code>python ${dataset.pipeline[0]}</code> then ` +
+        `<code>python ${dataset.pipeline[1]}</code> to generate <code>data.geojson</code>.</p>`;
       return;
     }
 
-    if (/basin/i.test(geo.kind || "")) {
-      const h = document.querySelector("#panel-empty h2");
-      const p = document.querySelector("#panel-empty p");
-      if (h) h.textContent = "No basin selected";
-      if (p) p.textContent = "Click a highlighted basin on the map to see every forecast inside it.";
-    }
+    const emptyH = document.querySelector("#panel-empty h2");
+    const emptyP = document.querySelector("#panel-empty p");
+    if (emptyH) emptyH.textContent = dataset.emptyTitle;
+    if (emptyP) emptyP.textContent = dataset.emptyBody;
 
     const models = new Set();
     for (const f of byRes[String(resolutions[0])].features) {
@@ -450,6 +504,9 @@ import L from "leaflet";
     .then(buildFromGeojson)
     .catch((err) => {
       document.getElementById("panel-empty").innerHTML =
-        "<strong>Error obtain";
+        "<h2 class=\"text-slate-800 font-semibold text-[15px] mb-1\">Couldn't load forecast data</h2>" +
+        "<p class=\"text-sm leading-relaxed max-w-[240px]\">" +
+        String(err && err.message ? err.message : err) +
+        "</p>";
     });
 })();
