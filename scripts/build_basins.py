@@ -105,6 +105,9 @@ def load_geoglows(path, wanted_comids):
             if key not in cols:
                 sys.exit(f"{os.path.basename(path)} has no '{key}' column.")
         i_id, i_rp, i_mean = cols["comid"], cols["ret_per"], cols["mean"]
+        # lat/lon are optional: used only to deep-link a reach into the GEOGLOWS
+        # hydroviewer. Missing coords just mean no link, not a failed build.
+        i_lat, i_lon = cols.get("lat"), cols.get("lon")
         for row in r:
             try:
                 cid = int(row[i_id])
@@ -123,7 +126,16 @@ def load_geoglows(path, wanted_comids):
                 mean = float(row[i_mean])
             except (ValueError, IndexError):
                 mean = 0.0
-            out[cid] = (sev, rp, mean)
+
+            def _coord(idx):
+                if idx is None:
+                    return None
+                try:
+                    return float(row[idx])
+                except (ValueError, IndexError):
+                    return None
+
+            out[cid] = (sev, rp, mean, _coord(i_lat), _coord(i_lon))
     return out
 
 
@@ -156,6 +168,9 @@ def load_flood_hub(path):
                 "returnPeriodYr": "",
                 "peakDischargeCms": "",
                 "historicalComparison": "",
+                # Kept on the forecast (not just the tuple) so the gauge can be
+                # deep-linked into Flood Hub from the panel.
+                "lat": lat, "lon": lon,
             }))
     return out
 
@@ -311,12 +326,12 @@ def main():
     for bid, cid in basin_to_comid.items():
         if cid not in flooding:
             continue
-        sev, rp, mean = flooding[cid]
+        sev, rp, mean, lat, lon = flooding[cid]
         base.setdefault(bid, []).append({
             "model": "geoglows", "severity": sev, "riverId": str(cid),
             "country": "", "issuedTime": "", "startTime": "", "peakTime": "",
             "endTime": "", "returnPeriodYr": rp, "peakDischargeCms": mean,
-            "historicalComparison": "",
+            "historicalComparison": "", "lat": lat, "lon": lon,
         })
     print(f"Basins flooding (GEOGLOWS): {len(base):,}")
 

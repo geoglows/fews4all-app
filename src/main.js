@@ -193,6 +193,16 @@ import L from "leaflet";
       `<span class="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-semibold capitalize text-[#10161d]" style="background:${color}">${sev || "—"}</span>`;
 
     const cards = props.forecasts.map((fc) => {
+      const label = modelLabel(fc.model || "model");
+      const href = modelLink(fc);
+      // Linked when we have a coordinate; a plain span otherwise so a missing
+      // coordinate degrades to unlinked text rather than a dead link.
+      const title = href
+        ? `<a href="${href}" target="_blank" rel="noopener noreferrer"
+              title="Open this forecast in ${label}"
+              class="inline-flex items-center gap-1 text-sky-300 hover:text-sky-200 hover:underline">${label}<iconify-icon
+              icon="heroicons:arrow-top-right-on-square" class="text-[11px] opacity-80 not-italic"></iconify-icon></a>`
+        : label;
       const rows = FIELD_LABELS
         .filter(([k]) => k !== "historicalComparison")
         .map(([k, label]) => {
@@ -213,7 +223,7 @@ import L from "leaflet";
           <div class="flex items-center justify-between mb-2">
             <span class="flex items-center gap-1.5 font-semibold text-[13px] capitalize text-slate-100">
               <iconify-icon icon="heroicons:chart-bar" class="text-sky-300"></iconify-icon>
-              ${modelLabel(fc.model || "model")}
+              ${title}
             </span>
           </div>
           <dl class="grid grid-cols-[128px_1fr] gap-x-2.5 gap-y-1 text-[12.5px]">${rows}</dl>
@@ -273,6 +283,31 @@ import L from "leaflet";
 
   function modelLabel(m) {
     return MODEL_LABELS[m] || m.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+
+  // Deep link a single forecast back into its source application, centered on the
+  // reach/gauge coordinate the pipeline now carries. Returns null when there's no
+  // usable coordinate (older data, or a model we don't have a URL scheme for), so
+  // the caller can fall back to a plain, unlinked title. URL patterns live here in
+  // one place — if a provider changes routing, this is the only thing to update.
+  const LINK_ZOOM = {geoglows: 13, flood_hub: 10};
+
+  function modelLink(fc) {
+    const lat = Number(fc && fc.lat);
+    const lon = Number(fc && fc.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    const m = String((fc && fc.model) || "").toLowerCase();
+    if (m === "geoglows") {
+      // Hydroviewer is location-only; centering on the reach shows the stream.
+      return `https://hydroviewer.geoglows.org/#lon=${lon}&lat=${lat}` +
+             `&zoom=${LINK_ZOOM.geoglows}&definition=`;
+    }
+    if (m === "flood_hub") {
+      // /l/{lat}/{lng}/{zoom}[/g/{gaugeId}] — the id pins the specific gauge.
+      const base = `https://sites.research.google/floods/l/${lat}/${lon}/${LINK_ZOOM.flood_hub}`;
+      return fc.riverId ? `${base}/g/${encodeURIComponent(fc.riverId)}` : base;
+    }
+    return null;
   }
 
   function worstSeverity(forecasts) {
