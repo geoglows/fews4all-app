@@ -299,8 +299,7 @@ import L from "leaflet";
     const m = String((fc && fc.model) || "").toLowerCase();
     if (m === "geoglows") {
       // Hydroviewer is location-only; centering on the reach shows the stream.
-      return `https://hydroviewer.geoglows.org/#lon=${lon}&lat=${lat}` +
-             `&zoom=${LINK_ZOOM.geoglows}&definition=`;
+      return `https://hydroviewer.geoglows.org/#lon=${lon}&lat=${lat}&zoom=${LINK_ZOOM.geoglows}&definition=`;
     }
     if (m === "flood_hub") {
       // /l/{lat}/{lng}/{zoom}[/g/{gaugeId}] — the id pins the specific gauge.
