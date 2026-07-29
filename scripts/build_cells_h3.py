@@ -2,8 +2,9 @@
 """
 build_cells_h3.py — bin flood points into H3 hexagons at several resolutions.
 
-Reads:  ../flood_points.json   per-point forecasts with lat/lon
-Writes: ../data.geojson        one GeoJSON FeatureCollection; each feature tagged
+Reads:  the raw model CSVs, via csv_to_json_vgrid.load_points() — no intermediate
+        file, mirroring how build_basins.py reads its CSVs directly.
+Writes: ../data_cells.geojson  one GeoJSON FeatureCollection; each feature tagged
                                with `res`, plus a top-level `resolutions` member
 """
 
@@ -12,12 +13,13 @@ import os
 import sys
 import inspect
 
+from Other.csv_to_json_vgrid import load_points   # sibling script; reads + adapts the CSVs
+
 RESOLUTIONS = [3, 4, 5, 6]
 FIX_ANTIMERIDIAN = "split"
 
 HERE = os.path.dirname(os.path.abspath(__file__))   # <repo>/scripts
 ROOT = os.path.dirname(HERE)                        # <repo>
-POINTS_JSON = os.path.join(ROOT, "flood_points.json")
 OUTPUT = os.path.join(ROOT, "data_cells.geojson")
 
 SEVERITY_RANK = {
@@ -118,11 +120,10 @@ def main():
             f"    pip install vgridpandas"
         )
 
-    if not os.path.exists(POINTS_JSON):
-        sys.exit(f"Not found: {POINTS_JSON}\nRun csv_to_json_vgrid.py first.")
-
-    with open(POINTS_JSON, encoding="utf-8") as f:
-        points = json.load(f)
+    try:
+        points = load_points()
+    except (ValueError, FileNotFoundError) as e:
+        sys.exit(f"Error reading source CSVs: {e}")
     print(f"Read {len(points)} flood point(s).")
 
     df = pd.DataFrame(points)
