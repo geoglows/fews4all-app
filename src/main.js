@@ -149,7 +149,118 @@ import L from "leaflet";
   }
 
   baseLayers["Google Hybrid"].addTo(map);
-  L.control.layers(baseLayers, null, {position: "topright", collapsed: false}).addTo(map);
+  // Collapsed = a single icon button that opens the base-map list on hover/click,
+  // instead of the always-expanded radio list.
+  const layersControl = L.control.layers(
+    baseLayers, null, {position: "topright", collapsed: true}
+  ).addTo(map);
+  // Swap Leaflet's default sprite for an on-brand layers icon (and drop the
+  // background image so it renders regardless of how Vite bundles Leaflet's assets).
+  const layersToggle = layersControl.getContainer()
+    .querySelector(".leaflet-control-layers-toggle");
+  if (layersToggle) {
+    layersToggle.innerHTML =
+      '<iconify-icon icon="lucide:layers" class="text-[19px] text-slate-700"></iconify-icon>';
+    layersToggle.style.cssText =
+      "background-image:none;display:flex;align-items:center;justify-content:center;";
+    layersToggle.title = "Base map";
+  }
+
+  // Give each entry a thumbnail preview, gallery-style. The thumbnail is just one
+  // real tile of the same location from that layer's own source, so each preview
+  // shows the area in that layer's actual style. Keyed by the names in baseLayers.
+  function lonLatToTile(lon, lat, z) {
+    const n = 2 ** z;
+    const latRad = (lat * Math.PI) / 180;
+    return {
+      z,
+      x: Math.floor(((lon + 180) / 360) * n),
+      y: Math.floor(((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n),
+    };
+  }
+  // San Francisco Bay at z11 — a recognizable mix of city, water, and bridges.
+  const THUMB = lonLatToTile(-122.40, 37.80, 11);
+  const BASE_THUMBS = {
+    "Google Hybrid": `https://mt0.google.com/vt/lyrs=y&x=${THUMB.x}&y=${THUMB.y}&z=${THUMB.z}`,
+    "Google Satellite": `https://mt0.google.com/vt/lyrs=s&x=${THUMB.x}&y=${THUMB.y}&z=${THUMB.z}`,
+    "OpenStreetMap": `https://a.tile.openstreetmap.org/${THUMB.z}/${THUMB.x}/${THUMB.y}.png`,
+  };
+
+  const basemapRows = {};   // layer name -> its row element, for hover/selected styling
+  layersControl.getContainer()
+    .querySelectorAll(".leaflet-control-layers-base label")
+    .forEach((label) => {
+      const span = label.querySelector("span");
+      const name = span ? span.textContent.trim() : "";
+      const row = label.querySelector("div") || label;
+      row.style.cssText = "display:flex;align-items:center;gap:11px;padding:6px;cursor:pointer;";
+      L.DomUtil.addClass(row, "basemap-row");
+      if (name) basemapRows[name] = row;
+      const url = BASE_THUMBS[name];
+      if (url) {
+        const img = document.createElement("img");
+        img.src = url;
+        img.alt = "";
+        img.loading = "lazy";
+        img.style.cssText =
+          "width:104px;height:72px;object-fit:cover;border-radius:6px;border:1px solid #cbd5e1;flex:none;";
+        row.insertBefore(img, row.firstChild);
+      }
+      if (span) {
+        span.style.cssText =
+          "font:600 13.5px system-ui,sans-serif;color:#0f172a;white-space:nowrap;";
+      }
+      // The label still selects the layer on click; the radio itself is redundant
+      // once each row is a full-width clickable thumbnail, so hide it.
+      const input = label.querySelector("input");
+      if (input) input.style.display = "none";
+    });
+
+  // Tile-style hover, plus a persistent highlight on the active basemap.
+  const basemapStyle = document.createElement("style");
+  basemapStyle.textContent =
+    ".basemap-row{border-radius:7px;transition:background .12s ease;}" +
+    ".basemap-row:hover{background:#eef4fb;}" +
+    ".basemap-row.basemap-selected{background:#e4eefb;box-shadow:inset 0 0 0 2px #3b82f6;}";
+  document.head.appendChild(basemapStyle);
+
+  function markBasemapSelected(name) {
+    Object.entries(basemapRows).forEach(([n, el]) => {
+      (n === name ? L.DomUtil.addClass : L.DomUtil.removeClass)(el, "basemap-selected");
+    });
+  }
+  markBasemapSelected("Google Hybrid");   // the layer added to the map by default
+  map.on("baselayerchange", (e) => markBasemapSelected(e.name));
+
+  // Open on click, not hover. The button stays visible while the list is open and
+  // acts as a toggle: click it again (or click away) to collapse.
+  const layersContainer = layersControl.getContainer();
+  // Leaflet hides the toggle once expanded; keep it shown so it can close the list.
+  const keepToggle = document.createElement("style");
+  keepToggle.textContent =
+    ".leaflet-control-layers-expanded .leaflet-control-layers-toggle{display:flex !important;" +
+    "width:100% !important;height:28px;box-sizing:border-box;padding-right:4px;" +
+    "justify-content:flex-end !important;align-items:center;" +
+    "margin-bottom:4px;border-bottom:1px solid #e2e8f0;}";
+  document.head.appendChild(keepToggle);
+
+  L.DomEvent.off(layersContainer, "mouseenter mouseleave");   // drop Leaflet's hover open/close
+  // Leaflet also binds its own expand-on-click to the toggle, which runs before
+  // ours and flips the state we read. Remove it so only our toggle logic drives it.
+  L.DomEvent.off(layersToggle, "click");
+  L.DomEvent.on(layersToggle, "click", (e) => {
+    L.DomEvent.stop(e);
+    if (L.DomUtil.hasClass(layersContainer, "leaflet-control-layers-expanded")) {
+      layersControl.collapse();
+    } else {
+      layersControl.expand();
+    }
+  });
+  // Clicks inside the open panel (including picking a layer) must not close it.
+  L.DomEvent.on(layersContainer, "click", L.DomEvent.stopPropagation);
+  // Any click outside — the map or anywhere else — closes it.
+  map.on("click", () => layersControl.collapse());
+  document.addEventListener("click", () => layersControl.collapse());
 
   const resControl = L.control({position: "bottomleft"});
   resControl.onAdd = function () {
