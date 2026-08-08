@@ -8,18 +8,17 @@ Writes: ../data_cells.geojson  one GeoJSON FeatureCollection; each feature tagge
                                with `res`, plus a top-level `resolutions` member
 """
 
+import inspect
 import json
 import os
 import sys
-import inspect
-
-from Other.csv_to_json_vgrid import load_points   # sibling script; reads + adapts the CSVs
+from Other.csv_to_json_vgrid import load_points  # sibling script; reads + adapts the CSVs
 
 RESOLUTIONS = [3, 4, 5, 6]
 FIX_ANTIMERIDIAN = "split"
 
-HERE = os.path.dirname(os.path.abspath(__file__))   # <repo>/scripts
-ROOT = os.path.dirname(HERE)                        # <repo>
+HERE = os.path.dirname(os.path.abspath(__file__))  # <repo>/scripts
+ROOT = os.path.dirname(HERE)  # <repo>
 OUTPUT = os.path.join(ROOT, "data_cells.geojson")
 
 SEVERITY_RANK = {

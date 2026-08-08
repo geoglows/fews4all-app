@@ -1,12 +1,12 @@
 # FEWS4All
+
 A web map that flags flood-forecast locations (H3 grid cells or HydroBASINS basins)
 and shows each model's forecast on click. Data comes from GEOGLOWS and Google Flood Hub.
 
 ## Stack
 
-Built with **Vite** — it bundles the app, serves it with hot reload during
-development, and produces the static `dist/` build. Dependencies come from npm
-(Leaflet, Iconify, Tailwind CSS v4 via `@tailwindcss/vite`), so there are no CDN
+Built with **Vite** — it bundles the app, serves it with hot reload during development, and produces the static `dist/` build. Dependencies come from npm (Leaflet, Iconify, Tailwind CSS v4 via
+`@tailwindcss/vite`), so there are no CDN
 `<script>` tags. Vite also replaces VS Code Go Live — `npm run dev` is the dev server.
 
 ## Run the app
@@ -58,11 +58,9 @@ python build_basins.py          # + HUC0{4..8}.parquet -> data.geojson
 Basins telescope from level 4 (coarse) to level 8 (fine); GEOGLOWS rivers join via
 `global_matches.csv`, Flood Hub gauges by point-in-polygon.
 
-Both pipelines write the same `data.geojson` format, so whichever you run last is
-what gets uploaded.
+Both pipelines write the same `data.geojson` format, so whichever you run last is what gets uploaded.
 
 ## Severity
 
-Four tiers — none / warning / danger / extreme. Flood Hub uses its own labels;
-GEOGLOWS is derived from return period (>=20yr extreme, >=5yr danger, >=2yr warning).
-Thresholds and the mean-flow floor are set at the top of `csv_to_json_vgrid.py`.
+Four tiers — none / warning / danger / extreme. Flood Hub uses its own labels; GEOGLOWS is derived from return period (>=20yr extreme, >=5yr danger, >=2yr warning). Thresholds and the mean-flow floor
+are set at the top of `csv_to_json_vgrid.py`.

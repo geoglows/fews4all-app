@@ -5,12 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "build",
+    "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
-    "iconify-icon": "^3.0.2",
-    "leaflet": "^1.9.4"
+    "heroicons": "^2.2.0",
+    "maplibre-gl": "^6.2.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",

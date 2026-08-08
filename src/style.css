@@ -6,7 +6,7 @@
 }
 
 /* Everything below is what Tailwind utilities can't cleanly express: base
- * sizing, Leaflet overrides, and a Preflight fix for map tiles. */
+ * sizing, MapLibre overrides, and the custom map controls. */
 
 html, body {
     height: 100%;
@@ -19,21 +19,113 @@ html, body {
     display: none !important;
 }
 
-/* Tailwind Preflight resets <img> (max-width:100%), which breaks Leaflet
- * tiles/markers. Restore their natural sizing. */
-.leaflet-container img {
-    max-width: none !important;
-}
-
-/* Remove the browser focus outline (blue box) on a clicked basin */
-.leaflet-interactive:focus {
+/* Remove the browser focus outline (blue box) on the map canvas */
+.maplibregl-canvas:focus {
     outline: none;
 }
 
-/* Leaflet popup + tooltip font size */
-.leaflet-popup-content,
-.leaflet-tooltip {
-    font-size: 13px;
+/* Hover tooltip. `pointer-events:none` matters: a MapLibre popup normally eats
+ * the pointer, and this one sits under the cursor, so without it the mousemove
+ * and click that drive the tooltip never reach the map. */
+.cell-tooltip {
+    pointer-events: none;
+}
+
+.cell-tooltip .maplibregl-popup-content {
+    padding: 5px 9px;
+    border-radius: 6px;
+    font: 13px system-ui, sans-serif;
+    color: #0f172a;
+    box-shadow: 0 1px 5px rgb(0 0 0 / 0.35);
+}
+
+.cell-tooltip .maplibregl-popup-tip {
+    display: none;
+}
+
+/* Tailwind Preflight resets <img> to max-width:100%, which squashes the
+ * fixed-size basemap thumbnails inside the controls. */
+.maplibregl-ctrl img {
+    max-width: none;
+}
+
+/* Current-resolution readout, bottom-left */
+.res-readout {
+    background: rgb(255 255 255 / 0.92);
+    padding: 3px 9px;
+    border-radius: 6px;
+    font: 600 12px system-ui, sans-serif;
+    color: #0f172a;
+    box-shadow: 0 1px 4px rgb(0 0 0 / 0.35);
+}
+
+/* Base-map switcher: an icon button that opens a gallery of thumbnails. The
+ * card chrome is copied from `.maplibregl-ctrl-group`, which this control skips
+ * so it doesn't inherit that class's fixed 29px button sizing. */
+.basemap-ctrl {
+    background: #fff;
+    border-radius: 4px;
+    box-shadow: 0 0 0 2px rgb(0 0 0 / 0.1);
+}
+
+.basemap-ctrl .basemap-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 29px;
+    height: 29px;
+    cursor: pointer;
+}
+
+/* Open: the button stretches across the top of the panel and keeps acting as
+ * the close control. */
+.basemap-ctrl.basemap-open .basemap-toggle {
+    width: 100%;
+    height: 28px;
+    box-sizing: border-box;
+    padding-right: 4px;
+    justify-content: flex-end;
+    margin-bottom: 4px;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.basemap-list {
+    padding: 0 4px 4px;
+}
+
+.basemap-row {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    width: 100%;
+    padding: 6px;
+    cursor: pointer;
+    border-radius: 7px;
+    transition: background .12s ease;
+}
+
+.basemap-row img {
+    width: 104px;
+    height: 72px;
+    object-fit: cover;
+    border-radius: 6px;
+    border: 1px solid #cbd5e1;
+    flex: none;
+}
+
+.basemap-row span {
+    font: 600 13.5px system-ui, sans-serif;
+    color: #0f172a;
+    white-space: nowrap;
+}
+
+.basemap-row:hover {
+    background: #eef4fb;
+}
+
+.basemap-row.basemap-selected {
+    background: #e4eefb;
+    box-shadow: inset 0 0 0 2px #3b82f6;
 }
 
 /* Side-panel scrollbar (light, to match the white panel) */
