@@ -21,8 +21,8 @@ import json
 import os
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))   # <repo>/scripts
-ROOT = os.path.dirname(HERE)                        # <repo>
+HERE = os.path.dirname(os.path.abspath(__file__))  # <repo>/scripts
+ROOT = os.path.dirname(HERE)  # <repo>
 FILES = os.path.join(ROOT, "Files")
 
 MATCHES_CSV = os.path.join(FILES, "global_matches.csv")
