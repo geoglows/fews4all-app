@@ -16,7 +16,6 @@ Writes: ../data.geojson                  one FeatureCollection, features tagged
                                          with `res` (the basin level); upload this
                                          to CloudFront for the app to consume
 """
-
 import csv
 import json
 import os

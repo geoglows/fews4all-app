@@ -2,26 +2,118 @@
 """
 build_cells_s2.py — bin flood points into S2 cells at several levels.
 
-Reads:  the raw model CSVs, via csv_to_json_vgrid.load_points() — no intermediate
-        file, mirroring how build_basins.py reads its CSVs directly.
+Reads:  ../Files/Geoglows_<date>.csv, ../Files/Flood_Hub_Global.csv (read directly,
+        self-contained like build_basins.py — no shared helper, no intermediate file)
 Writes: ../data_s2cells.geojson  one GeoJSON FeatureCollection; each feature tagged
                                with `res` (the S2 level), plus a top-level
                                `resolutions` member
 """
 
+import csv
 import json
 import os
 import sys
 import inspect
-
-from Other.csv_to_json_vgrid import load_points   # sibling script; reads + adapts the CSVs
 
 LEVELS = [2, 3, 4, 5, 6, 7, 8]
 FIX_ANTIMERIDIAN = "split"
 
 HERE = os.path.dirname(os.path.abspath(__file__))   # <repo>/scripts
 ROOT = os.path.dirname(HERE)                        # <repo>
+FILES = os.path.join(ROOT, "Files")
 OUTPUT = os.path.join(ROOT, "data_s2cells.geojson")
+
+GEOGLOWS_CSV = os.path.join(FILES, "Geoglows_2026-07-13-00.csv")
+FLOOD_HUB_CSV = os.path.join(FILES, "Flood_Hub_Global.csv")
+
+# GEOGLOWS has no severity label, only a return period (years); below 2-year is not
+# flagged, and streams below the mean-flow floor are dropped. Flood Hub uses labels.
+GEOGLOWS_SEVERITY_THRESHOLDS = [(20, "extreme"), (5, "danger"), (2, "warning")]
+GEOGLOWS_MIN_MEAN_FLOW = 5
+FLOOD_HUB_SEVERITY = {"ABOVE_NORMAL": "warning", "SEVERE": "danger", "EXTREME": "extreme"}
+
+
+def _f(v):
+    v = (v or "").strip()
+    if v == "":
+        return None
+    try:
+        return float(v)
+    except ValueError:
+        return None
+
+
+def geoglows_severity(ret_per):
+    for thr, sev in GEOGLOWS_SEVERITY_THRESHOLDS:
+        if ret_per >= thr:
+            return sev
+    return None
+
+
+def read_geoglows_points(path):
+    """Every flooding GEOGLOWS reach as a point (comid, ret_per, mean, lat, lon)."""
+    out = []
+    if not os.path.exists(path):
+        print(f"  note: {os.path.basename(path)} not found; GEOGLOWS skipped.", file=sys.stderr)
+        return out
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        for r in csv.DictReader(f):
+            rp = _f(r.get("ret_per"))
+            if rp is None:
+                continue
+            sev = geoglows_severity(int(rp))
+            if sev is None:
+                continue
+            mean = _f(r.get("mean"))
+            if GEOGLOWS_MIN_MEAN_FLOW and (mean is None or mean < GEOGLOWS_MIN_MEAN_FLOW):
+                continue
+            lat, lon = _f(r.get("lat")), _f(r.get("lon"))
+            if lat is None or lon is None:
+                continue
+            out.append({
+                "model": "geoglows", "severity": sev, "lat": lat, "lon": lon,
+                "riverId": (r.get("comid") or "").strip(),
+                "country": "", "returnPeriodYr": int(rp),
+                "peakDischargeCms": (r.get("mean") or "").strip(),
+                "issuedTime": "", "startTime": "", "peakTime": "", "endTime": "",
+                "historicalComparison": "",
+            })
+    return out
+
+
+def read_flood_hub_points(path):
+    """Every Flood Hub gauge alert as a point (with its coordinate)."""
+    out = []
+    if not os.path.exists(path):
+        print(f"  note: {os.path.basename(path)} not found; Flood Hub skipped.", file=sys.stderr)
+        return out
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        for r in csv.DictReader(f):
+            raw = (r.get("severity") or "").strip().upper()
+            if raw not in FLOOD_HUB_SEVERITY:
+                continue
+            lat = _f(r.get("gaugeLocation.latitude"))
+            lon = _f(r.get("gaugeLocation.longitude"))
+            if lat is None or lon is None:
+                continue
+            out.append({
+                "model": "flood_hub", "severity": FLOOD_HUB_SEVERITY[raw],
+                "lat": lat, "lon": lon,
+                "riverId": (r.get("gaugeId") or "").strip(),
+                "country": (r.get("queriedCountryName") or "").strip(),
+                "returnPeriodYr": "", "peakDischargeCms": "",
+                "issuedTime": (r.get("issuedTime") or "").strip(),
+                "startTime": (r.get("forecastTimeRange.start") or "").strip(),
+                "peakTime": "",
+                "endTime": (r.get("forecastTimeRange.end") or "").strip(),
+                "historicalComparison": "",
+            })
+    return out
+
+
+def load_points():
+    """Combined flood points from both models, read straight from the CSVs."""
+    return read_geoglows_points(GEOGLOWS_CSV) + read_flood_hub_points(FLOOD_HUB_CSV)
 
 SEVERITY_RANK = {
     "none": 0, "warning": 1, "danger": 2, "extreme": 3,
