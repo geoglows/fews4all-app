@@ -170,49 +170,82 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
   // San Francisco Bay at z11 — a recognizable mix of city, water, and bridges.
   const THUMB = lonLatToTile(-122.40, 37.80, 11);
 
+  // Basemap set mirrored from the River Forecast System companion app. All are free,
+  // no-key raster tile services. Esri/USGS serve tiles in {z}/{y}/{x} order, so their
+  // thumbnails use z/y/x too. (Esri's "Environment" basemap is a vector style needing
+  // an API key, so it's intentionally left out for now.)
+  const CARTO_ATTR = `${OSM_ATTR} &copy; <a href="https://carto.com/attributions">CARTO</a>`;
+  const ESRI_ATTR = '&copy; <a href="https://www.esri.com">Esri</a>';
+  const ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services";
+  const cartoThumb = (style) => `https://a.basemaps.cartocdn.com/${style}/${THUMB.z}/${THUMB.x}/${THUMB.y}.png`;
+  const esriThumb = (svc) => `${ESRI}/${svc}/MapServer/tile/${THUMB.z}/${THUMB.y}/${THUMB.x}`;
+
   const BASEMAPS = [
     {
+      id: "carto-light",
+      name: "Light grey (CARTO)",
+      thumb: cartoThumb("light_all"),
+      source: {
+        type: "raster",
+        tiles: shards(["a", "b", "c", "d"], "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"),
+        tileSize: 256, maxzoom: 20, attribution: CARTO_ATTR,
+      },
+    },
+    {
+      id: "carto-dark",
+      name: "Dark (CARTO)",
+      thumb: cartoThumb("dark_all"),
+      source: {
+        type: "raster",
+        tiles: shards(["a", "b", "c", "d"], "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png"),
+        tileSize: 256, maxzoom: 20, attribution: CARTO_ATTR,
+      },
+    },
+    {
       id: "osm",
-      name: "OpenStreetMap",
+      name: "Streets (OSM)",
       thumb: `https://a.tile.openstreetmap.org/${THUMB.z}/${THUMB.x}/${THUMB.y}.png`,
       source: {
         type: "raster",
         tiles: shards(["a", "b", "c"], "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"),
-        tileSize: 256,
-        maxzoom: 19,
-        attribution: OSM_ATTR,
+        tileSize: 256, maxzoom: 19, attribution: OSM_ATTR,
       },
     },
     {
-      // A deliberately washed-out base: the severity fills and the white
-      // selection ring are the only saturated things on the map.
-      id: "carto-positron",
-      name: "Light (CARTO)",
-      thumb: `https://a.basemaps.cartocdn.com/light_all/${THUMB.z}/${THUMB.x}/${THUMB.y}.png`,
+      id: "esri-imagery",
+      name: "Satellite (Esri)",
+      thumb: esriThumb("World_Imagery"),
       source: {
         type: "raster",
-        tiles: shards(["a", "b", "c", "d"], "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"),
-        tileSize: 256,
-        maxzoom: 20,
-        attribution: `${OSM_ATTR} &copy; <a href="https://carto.com/attributions">CARTO</a>`,
+        tiles: [`${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`],
+        tileSize: 256, maxzoom: 19,
+        attribution: `${ESRI_ATTR}, Maxar, Earthstar Geographics, and the GIS User Community`,
       },
     },
     {
-      // Contours and relief — the closest thing to a terrain view now that the
-      // satellite layers are gone, and the most useful one for reading a basin.
-      id: "opentopomap",
-      name: "Topographic",
-      thumb: `https://a.tile.opentopomap.org/${THUMB.z}/${THUMB.x}/${THUMB.y}.png`,
+      id: "esri-topo",
+      name: "Topographic (Esri)",
+      thumb: esriThumb("World_Topo_Map"),
       source: {
         type: "raster",
-        tiles: shards(["a", "b", "c"], "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png"),
-        tileSize: 256,
-        maxzoom: 17,
-        attribution: `${OSM_ATTR}, SRTM | &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)`,
+        tiles: [`${ESRI}/World_Topo_Map/MapServer/tile/{z}/{y}/{x}`],
+        tileSize: 256, maxzoom: 19,
+        attribution: `${ESRI_ATTR}, HERE, Garmin, FAO, NOAA, USGS, ${OSM_ATTR}, and the GIS User Community`,
+      },
+    },
+    {
+      id: "usgs-topo",
+      name: "Topographic (USGS)",
+      thumb: `https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/${THUMB.z}/${THUMB.y}/${THUMB.x}`,
+      source: {
+        type: "raster",
+        tiles: ["https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}"],
+        tileSize: 256, maxzoom: 16,
+        attribution: 'Tiles courtesy of the <a href="https://www.usgs.gov/">U.S. Geological Survey</a>',
       },
     },
   ];
-  const DEFAULT_BASEMAP = "osm";
+  const DEFAULT_BASEMAP = "carto-light";
 
   // ---- Map ------------------------------------------------------------------
 
