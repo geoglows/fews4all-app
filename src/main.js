@@ -112,6 +112,16 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
     return z >= STREAM_ALL_ZOOM ? 1 : Math.max(1, STREAM_ALL_ZOOM - Math.floor(z) + 1);
   }
 
+  // Flood Hub flash-flood polygons — a global overlay (available in every dataset
+  // view) toggled from the Flood Hub tile in the side panel. Two polygon types:
+  // "highly_likely" and "likely".
+  let flashOn = false;
+  let flashData = null;
+  let flashLoading = false;
+  const FLASH_SRC = "flash-src";
+  const FLASH_FILL = "flash-fill";
+  const FLASH_LAYERS = [FLASH_FILL, "flash-line-high", "flash-line-likely"];
+
   function unitLabel(props) {
     // Fall back to the per-feature tag if a file predates the `kind` member.
     if (props && props.basin_id && dataset.unit === "Area") return "Basin";
@@ -283,72 +293,83 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
   map.addControl(new NavigationControl({showCompass: false}), "top-left");
   map.addControl(new AttributionControl({compact: false}), "bottom-right");
 
-  // Base-map switcher: one icon button that opens a gallery of thumbnails,
-  // instead of an always-expanded radio list.
-  function basemapControl() {
-    let container = null;
-    let closeOnDocClick = null;
+  // ---- Shared dropdown controls (top-right column) --------------------------
+  // Each is an icon button that opens a panel to its left. Opening one closes the
+  // others; the button's `title` shows the tool's name on hover.
+  const openDropdowns = [];
+  function closeOtherDropdowns(self) {
+    openDropdowns.forEach((close) => { if (close !== self) close(); });
+  }
 
+  function dropdownControl(opts) {
+    // opts: { iconName, title, panelStyle?, render(panel), onReady?(container) }
+    let container = null, panel = null, closeOnDoc = null;
+    const close = () => { if (panel && !panel.hidden) panel.hidden = true; };
+    function toggle() {
+      if (panel.hidden) { closeOtherDropdowns(close); panel.hidden = false; }
+      else close();
+    }
     return {
-      onAdd(mapInstance) {
+      onAdd() {
         container = document.createElement("div");
-        // Deliberately not `maplibregl-ctrl-group`: that class carries a pile of
-        // fixed button sizing that would squash the thumbnail rows. The group's
-        // chrome (white card, rounded, shadow) is reproduced in style.css.
-        container.className = "maplibregl-ctrl basemap-ctrl";
-        container.innerHTML =
-          `<button type="button" class="basemap-toggle" title="Base map" aria-label="Base map">` +
-          icon("square-3-stack-3d", "text-[19px] text-slate-700") +
-          `</button>` +
-          `<div class="basemap-list" hidden>` +
-          BASEMAPS.map((b) =>
-            `<button type="button" class="basemap-row" data-basemap="${b.id}">` +
-            `<img src="${b.thumb}" alt="" loading="lazy"><span>${b.name}</span></button>`
-          ).join("") +
-          `</div>`;
-
-        const toggle = container.querySelector(".basemap-toggle");
-        const list = container.querySelector(".basemap-list");
-        const rows = [...container.querySelectorAll(".basemap-row")];
-
-        function highlight(id) {
-          rows.forEach((r) => r.classList.toggle("basemap-selected", r.dataset.basemap === id));
-        }
-
-        function select(id) {
-          BASEMAPS.forEach((b) => {
-            mapInstance.setLayoutProperty(b.id, "visibility", b.id === id ? "visible" : "none");
-          });
-          highlight(id);
-        }
-
-        // Controls are added before the style finishes loading, and
-        // `setLayoutProperty` throws until it has. The style already ships with
-        // the default visible, so this only has to match the marker to it.
-        highlight(DEFAULT_BASEMAP);
-        toggle.addEventListener("click", () => {
-          list.hidden = !list.hidden;
-          container.classList.toggle("basemap-open", !list.hidden);
-        });
-        rows.forEach((r) => r.addEventListener("click", () => select(r.dataset.basemap)));
-        // Clicks inside the control (including picking a layer) keep it open;
-        // any click elsewhere — the map or the page — closes it.
+        container.className = "maplibregl-ctrl";
+        container.style.cssText = "position:relative;background:#fff;border-radius:4px;box-shadow:0 0 0 2px rgb(0 0 0 / .1)";
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.setAttribute("aria-label", opts.title);
+        btn.style.cssText = "display:flex;align-items:center;justify-content:center;width:29px;height:29px;cursor:pointer;background:none;border:0";
+        btn.innerHTML = icon(opts.iconName, "text-[19px] text-slate-700");
+        panel = document.createElement("div");
+        panel.hidden = true;
+        panel.style.cssText = "position:absolute;top:0;right:34px;background:#fff;border-radius:6px;" +
+          "box-shadow:0 1px 6px rgb(0 0 0 / .3);" + (opts.panelStyle || "padding:6px");
+        // Name label that pops up to the left on hover (native title is too slow).
+        const tip = document.createElement("div");
+        tip.textContent = opts.title;
+        tip.style.cssText = "position:absolute;right:36px;top:50%;transform:translateY(-50%);white-space:nowrap;" +
+          "background:#0f172a;color:#fff;font:600 11px system-ui,sans-serif;padding:3px 7px;border-radius:5px;" +
+          "pointer-events:none;opacity:0;transition:opacity .1s;box-shadow:0 1px 4px rgb(0 0 0 / .3)";
+        btn.addEventListener("mouseenter", () => { if (panel.hidden) tip.style.opacity = "1"; });
+        btn.addEventListener("mouseleave", () => { tip.style.opacity = "0"; });
+        container.append(btn, panel, tip);
+        opts.render(panel);
+        btn.addEventListener("click", toggle);
         container.addEventListener("click", (e) => e.stopPropagation());
-        closeOnDocClick = () => {
-          list.hidden = true;
-          container.classList.remove("basemap-open");
-        };
-        document.addEventListener("click", closeOnDocClick);
+        closeOnDoc = () => close();
+        document.addEventListener("click", closeOnDoc);
+        openDropdowns.push(close);
+        if (opts.onReady) opts.onReady(container, panel);
         return container;
       },
       onRemove() {
-        document.removeEventListener("click", closeOnDocClick);
+        document.removeEventListener("click", closeOnDoc);
+        const i = openDropdowns.indexOf(close);
+        if (i >= 0) openDropdowns.splice(i, 1);
         container.remove();
       },
     };
   }
 
-  map.addControl(basemapControl(), "top-right");
+  // Base-map switcher: a gallery of thumbnails.
+  function basemapControl() {
+    return dropdownControl({
+      iconName: "square-3-stack-3d",
+      title: "Base Map Layers",
+      panelStyle: "padding:0 4px 4px",
+      render(panel) {
+        panel.innerHTML = BASEMAPS.map((b) =>
+          `<button type="button" class="basemap-row" data-basemap="${b.id}">` +
+          `<img src="${b.thumb}" alt="" loading="lazy"><span>${b.name}</span></button>`).join("");
+        const rows = [...panel.querySelectorAll(".basemap-row")];
+        const highlight = (id) => rows.forEach((r) => r.classList.toggle("basemap-selected", r.dataset.basemap === id));
+        rows.forEach((r) => r.addEventListener("click", () => {
+          BASEMAPS.forEach((b) => map.setLayoutProperty(b.id, "visibility", b.id === r.dataset.basemap ? "visible" : "none"));
+          highlight(r.dataset.basemap);
+        }));
+        highlight(DEFAULT_BASEMAP);
+      },
+    });
+  }
 
   // Current resolution readout, bottom-left.
   map.addControl({
@@ -383,96 +404,102 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
   const panelEmpty = document.getElementById("panel-empty");
   const panelContent = document.getElementById("panel-content");
 
-  function showCell(props) {
+  const MODEL_HOME = {
+    geoglows: "https://hydroviewer.geoglows.org/",
+    flood_hub: "https://sites.research.google/floods/",
+  };
+  const PANEL_MODELS = ["geoglows", "flood_hub"];
+
+  // The panel always lists both models. A model shows a full card when the selected
+  // feature carries its forecast, otherwise a shrunken "standby" card (name linked to
+  // its own app). The Flood Hub tile always carries the flash-flood polygon toggle.
+  function renderPanel(props) {
     panelEmpty.hidden = true;
     panelContent.hidden = false;
-
-    const worst = (props.severity || "").toLowerCase();
-    const worstColor = sevColor(worst);
+    const selected = !!props;
 
     const badge = (sev, color) =>
       `<span class="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-semibold capitalize text-[#10161d]" style="background:${color}">${sev || "—"}</span>`;
 
-    const cards = props.forecasts.map((fc) => {
-      const label = modelLabel(fc.model || "model");
-      const href = modelLink(fc);
-      // Linked when we have a coordinate; a plain span otherwise so a missing
-      // coordinate degrades to unlinked text rather than a dead link.
-      const title = href
-        ? `<a href="${href}" target="_blank" rel="noopener noreferrer"
-              title="Open this forecast in ${label}"
-              class="inline-flex items-center gap-1 text-sky-300 hover:text-sky-200 hover:underline">${label}${
-          icon("arrow-top-right-on-square", "text-[11px] opacity-80")}</a>`
-        : label;
-      const rows = FIELD_LABELS
-        .filter(([k]) => k !== "historicalComparison")
-        .map(([k, label]) => {
+    function modelTitle(m, fc) {
+      const label = modelLabel(m);
+      const href = (fc && modelLink(fc)) || MODEL_HOME[m];
+      return `<a href="${href}" target="_blank" rel="noopener noreferrer" title="Open ${label}"
+         class="inline-flex items-center gap-1 text-sky-300 hover:text-sky-200 hover:underline">${label}${
+        icon("arrow-top-right-on-square", "text-[11px] opacity-80")}</a>`;
+    }
+    const flashToggle =
+      `<label class="flex items-center gap-1.5 text-[11px] font-medium text-slate-300 cursor-pointer select-none shrink-0" title="Toggle Flood Hub flash-flood polygons">` +
+      `<input type="checkbox" id="flash-toggle" class="accent-violet-500 w-3.5 h-3.5"${flashOn ? " checked" : ""}>Flash floods</label>`;
+
+    function modelTile(m) {
+      const fcs = selected ? props.forecasts.filter((f) => f.model === m) : [];
+      const has = fcs.length > 0;
+      const head =
+        `<div class="flex items-center justify-between gap-2 mb-1.5">` +
+        `<span class="flex items-center gap-1.5 font-semibold text-[13px] capitalize ${has ? "text-slate-100" : "text-slate-400"}">` +
+        icon("chart-bar", has ? "text-sky-300" : "text-slate-500") + modelTitle(m, fcs[0]) + `</span>` +
+        (m === "flood_hub" ? flashToggle : "") + `</div>`;
+      if (!has) {
+        return `<div class="bg-[#141e2a] border border-slate-700/60 rounded-[10px] px-3.5 py-2.5 mb-3">` + head +
+          `<div class="text-slate-500 text-[11px]">On standby — ${selected ? "no forecast for this area" : "no area selected"}.</div></div>`;
+      }
+      const body = fcs.map((fc, i) => {
+        const rows = FIELD_LABELS.filter(([k]) => k !== "historicalComparison").map(([k, label]) => {
           const dt = `<dt class="text-slate-400">${label}</dt>`;
-          if (k === "severity") {
-            return `${dt}<dd class="m-0">${badge(fc.severity, sevColor(fc.severity))}</dd>`;
-          }
-          return `${dt}<dd class="m-0 text-slate-100 break-words">${fmtValue(k, fc[k])}</dd>`;
-        })
-        .join("");
-      const note = fc.historicalComparison
-        ? `<div class="flex items-start gap-1.5 text-xs text-slate-400 italic mt-2">
-             ${icon("clock", "text-sm mt-0.5")}
-             <span>“${fc.historicalComparison}”</span>
-           </div>` : "";
-      return `
-        <div class="bg-[#1b2a3a] border border-slate-700 border-l-4 rounded-[10px] px-3.5 py-3 mb-3" style="border-left-color:${sevColor(fc.severity)}">
-          <div class="flex items-center justify-between mb-2">
-            <span class="flex items-center gap-1.5 font-semibold text-[13px] capitalize text-slate-100">
-              ${icon("chart-bar", "text-sky-300")}
-              ${title}
-            </span>
-          </div>
-          <dl class="grid grid-cols-[128px_1fr] gap-x-2.5 gap-y-1 text-[12.5px]">${rows}</dl>
-          ${note}
-        </div>`;
-    }).join("");
+          return k === "severity"
+            ? `${dt}<dd class="m-0">${badge(fc.severity, sevColor(fc.severity))}</dd>`
+            : `${dt}<dd class="m-0 text-slate-100 break-words">${fmtValue(k, fc[k])}</dd>`;
+        }).join("");
+        const note = fc.historicalComparison
+          ? `<div class="flex items-start gap-1.5 text-xs text-slate-400 italic mt-2">${icon("clock", "text-sm mt-0.5")}<span>“${fc.historicalComparison}”</span></div>`
+          : "";
+        return `<dl class="grid grid-cols-[128px_1fr] gap-x-2.5 gap-y-1 text-[12.5px]${i ? " mt-2 pt-2 border-t border-slate-700/50" : ""}">${rows}</dl>${note}`;
+      }).join("");
+      return `<div class="bg-[#1b2a3a] border border-slate-700 border-l-4 rounded-[10px] px-3.5 py-3 mb-3" style="border-left-color:${sevColor(worstSeverity(fcs))}">` +
+        head + body + `</div>`;
+    }
 
-    const imp = props.impact;
-    const tile = (name, label, value, span) => `
-      <div class="${span ? "col-span-2 " : ""}rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2">
-        <div class="flex items-center gap-1 text-slate-400 text-[10px] font-semibold uppercase tracking-wide mb-1">
-          ${icon(name, "text-[12px]")}${label}
-        </div>
-        <div class="text-slate-800 font-bold text-[15px] leading-none">${value}</div>
-      </div>`;
-    const impactHtml = imp ? `
-      <div class="mt-4 pt-3 border-t border-slate-200">
-        <h3 class="flex items-center gap-1.5 text-slate-800 font-semibold text-[11px] uppercase tracking-wider mb-2">
-          ${icon("exclamation-triangle", "text-amber-500 text-sm")}Impact
-        </h3>
-        <div class="grid grid-cols-2 gap-2">
-          ${tile("building-office-2", "Buildings", fmtCount(imp.buildings))}
-          ${tile("rectangle-group", "Farmland", fmtCount(imp.farmland_m2 / 1e6) + " km²")}
-          ${tile("map", "Roads", fmtCount(imp.highway_km) + " km")}
-          ${tile("arrows-right-left", "Railways", fmtCount(imp.railway_km) + " km")}
-          ${tile("users", "Population", fmtCount(imp.population), true)}
-        </div>
-        <p class="text-slate-400 text-[10px] mt-1.5">Totals across the whole basin.</p>
-      </div>` : "";
+    // The "All models" filter also controls which tiles appear here.
+    const tiles = PANEL_MODELS.filter((m) => visibleModels.has(m)).map(modelTile).join("");
 
-    const nModels = (props.models || []).length;
-    const confidence = nModels >= 2
-      ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800">
-           ${icon("check-badge")}${nModels} models agree</span>`
-      : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-500">Single model</span>`;
+    let head;
+    if (selected) {
+      const worst = (props.severity || "").toLowerCase();
+      const worstColor = sevColor(worst);
+      const nModels = (props.models || []).length;
+      const confidence = nModels >= 2
+        ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800">${icon("check-badge")}${nModels} models agree</span>`
+        : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-500">Single model</span>`;
+      head =
+        `<h2 class="flex items-center gap-2 text-slate-800 font-semibold text-[15px] mb-0.5">` +
+        `<span class="inline-flex" style="color:${worstColor}">${icon("squares-2x2")}</span> ${unitLabel(props)} ${props.cell_id} ${badge(worst, worstColor)}</h2>` +
+        `<div class="flex items-center gap-2 mb-3.5">${confidence}` +
+        `<span class="text-slate-500 text-xs">${props.model_count} forecast${props.model_count === 1 ? "" : "s"} · worst-case above</span></div>`;
+    } else {
+      head = `<div class="text-slate-500 text-[13px] mb-3.5">Select a highlighted ${dataset.unit.toLowerCase()} on the map to see its forecasts.</div>`;
+    }
 
-    panelContent.innerHTML = `
-      <h2 class="flex items-center gap-2 text-slate-800 font-semibold text-[15px] mb-0.5">
-        <span class="inline-flex" style="color:${worstColor}">${icon("squares-2x2")}</span>
-        ${unitLabel(props)} ${props.cell_id}
-        ${badge(worst, worstColor)}
-      </h2>
-      <div class="flex items-center gap-2 mb-3.5">
-        ${confidence}
-        <span class="text-slate-500 text-xs">${props.model_count} forecast${props.model_count === 1 ? "" : "s"} · worst-case above</span>
-      </div>
-      ${cards}
-      ${impactHtml}`;
+    const imp = selected ? props.impact : null;
+    const impTile = (name, label, value, span) =>
+      `<div class="${span ? "col-span-2 " : ""}rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2">` +
+      `<div class="flex items-center gap-1 text-slate-400 text-[10px] font-semibold uppercase tracking-wide mb-1">${icon(name, "text-[12px]")}${label}</div>` +
+      `<div class="text-slate-800 font-bold text-[15px] leading-none">${value}</div></div>`;
+    const impactHtml = imp
+      ? `<div class="mt-4 pt-3 border-t border-slate-200"><h3 class="flex items-center gap-1.5 text-slate-800 font-semibold text-[11px] uppercase tracking-wider mb-2">${icon("exclamation-triangle", "text-amber-500 text-sm")}Impact</h3>` +
+        `<div class="grid grid-cols-2 gap-2">` +
+        impTile("building-office-2", "Buildings", fmtCount(imp.buildings)) +
+        impTile("rectangle-group", "Farmland", fmtCount(imp.farmland_m2 / 1e6) + " km²") +
+        impTile("map", "Roads", fmtCount(imp.highway_km) + " km") +
+        impTile("arrows-right-left", "Railways", fmtCount(imp.railway_km) + " km") +
+        impTile("users", "Population", fmtCount(imp.population), true) +
+        `</div><p class="text-slate-400 text-[10px] mt-1.5">Totals across the whole basin.</p></div>`
+      : "";
+
+    panelContent.innerHTML = head + tiles + impactHtml;
+
+    const cb = document.getElementById("flash-toggle");
+    if (cb) cb.addEventListener("change", () => setFlashOn(cb.checked));
   }
 
   let resolutions = [];
@@ -480,7 +507,7 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
 
   // ---- Model filter (toggle at the top of the panel) ------------------------
   const visibleModels = new Set();
-  const MODEL_LABELS = {flood_hub: "Flood Hub", geoglows: "GEOGLOWS"};
+  const MODEL_LABELS = {geoglows: "GEOGLOWS", flood_hub: "Flood Hub"};
 
   function modelLabel(m) {
     return MODEL_LABELS[m] || m.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -642,10 +669,9 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
   function clearSelection() {
     setFeatureState(selectedId, {selected: false});
     selectedId = null;
-    panelContent.hidden = true;
-    panelEmpty.hidden = false;
     selectedBasinId = null;
     refreshContext();                 // hide any per-basin context
+    renderPanel(null);                // standby tiles (both models still listed)
   }
 
   function selectFeature(id) {
@@ -654,7 +680,7 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
     setFeatureState(selectedId, {selected: false});
     selectedId = id;
     setFeatureState(selectedId, {selected: true});
-    showCell(feature.properties);
+    renderPanel(feature.properties);
     selectedBasinId = String(feature.properties.cell_id);
     refreshContext();                 // reveal this basin's streams/districts (if armed)
     zoomToSelection(feature);          // frame per the "Zoom to" choice
@@ -819,12 +845,17 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
       for (const fc of f.properties.forecasts) if (fc.model) models.add(fc.model);
     }
     models.forEach((m) => visibleModels.add(m));
-    renderModelToggle([...models].sort());
+    // Order the filter to match the panel tiles (GEOGLOWS first), unknowns after.
+    renderModelToggle([...models].sort((a, b) => {
+      const ia = PANEL_MODELS.indexOf(a), ib = PANEL_MODELS.indexOf(b);
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b);
+    }));
 
     addCellLayers();
     // Bind hover/click once, now that the fill layer first exists; the layer id is
     // reused on every dataset switch so the delegated handlers keep working.
     if (!interactionsBound) { bindCellInteractions(); interactionsBound = true; }
+    raiseFlash();        // flash polygons stay above the freshly (re)added cells
 
     showRes(resolutions[0]);
     if (fit) {
@@ -835,11 +866,68 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
   }
 
   function panelError(err) {
+    panelContent.hidden = true;
+    panelEmpty.hidden = false;
     document.getElementById("panel-empty").innerHTML =
       "<h2 class=\"text-slate-800 font-semibold text-[15px] mb-1\">Couldn't load forecast data</h2>" +
       "<p class=\"text-sm leading-relaxed max-w-[240px]\">" +
       String(err && err.message ? err.message : err) +
       "</p>";
+  }
+
+  // ---- Flood Hub flash-flood polygons (global overlay) ----------------------
+
+  function loadFlash(cb) {
+    if (flashData) return cb(flashData);
+    if (flashLoading) return;
+    flashLoading = true;
+    fetch(CDN + "data_flash_floods.geojson")
+      .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then((data) => { flashData = data; flashLoading = false; cb(data); })
+      .catch((err) => { flashLoading = false; console.warn("flash floods:", err.message); cb(null); });
+  }
+
+  // Violet, distinct from severity (yellow/orange/red), streams (cyan) and districts
+  // (magenta). "highly_likely" = darker fill + solid outline; "likely" = lighter fill
+  // + dashed outline.
+  function ensureFlashLayers() {
+    if (map.getSource(FLASH_SRC) || !flashData) return;
+    map.addSource(FLASH_SRC, {type: "geojson", data: flashData});
+    map.addLayer({
+      id: FLASH_FILL, type: "fill", source: FLASH_SRC,
+      paint: {
+        "fill-color": ["match", ["get", "polygon_type"], "highly_likely", "#6d28d9", "#a78bfa"],
+        "fill-opacity": ["match", ["get", "polygon_type"], "highly_likely", 0.5, 0.32],
+      },
+    });
+    map.addLayer({
+      id: "flash-line-high", type: "line", source: FLASH_SRC,
+      filter: ["==", ["get", "polygon_type"], "highly_likely"],
+      paint: {"line-color": "#4c1d95", "line-width": 1.8, "line-opacity": 0.95},
+    });
+    map.addLayer({
+      id: "flash-line-likely", type: "line", source: FLASH_SRC,
+      filter: ["==", ["get", "polygon_type"], "likely"],
+      paint: {"line-color": "#7c3aed", "line-width": 1.1, "line-opacity": 0.9, "line-dasharray": [2, 1.5]},
+    });
+  }
+
+  function setFlashOn(on) {
+    flashOn = on;
+    if (!on) {
+      FLASH_LAYERS.forEach((id) => { if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", "none"); });
+      return;
+    }
+    loadFlash((data) => {
+      if (!data) { flashOn = false; const cb = document.getElementById("flash-toggle"); if (cb) cb.checked = false; return; }
+      ensureFlashLayers();
+      FLASH_LAYERS.forEach((id) => { if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", "visible"); });
+    });
+  }
+
+  // Keep the flash polygons above the cell layers after a dataset (re)build.
+  function raiseFlash() {
+    if (map.getLayer(FLASH_FILL)) FLASH_LAYERS.forEach((id) => map.moveLayer(id));
   }
 
   // ---- Dataset switching (basins / h3 / s2) ---------------------------------
@@ -998,49 +1086,46 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
 
   function highlightDataset() {
     if (!datasetControlEl) return;
-    datasetControlEl.querySelectorAll("button").forEach((b) => {
+    datasetControlEl.querySelectorAll(".ds-row").forEach((b) => {
       const on = b.dataset.ds === currentDatasetKey;
       b.style.background = on ? "#0284c7" : "transparent";
       b.style.color = on ? "#fff" : "#334155";
     });
   }
 
+  // Data-layer picker: Basins / H3 / S2.
   function datasetControl() {
-    return {
-      onAdd() {
-        const el = document.createElement("div");
-        el.className = "maplibregl-ctrl";
-        el.style.cssText = "background:#fff;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.3);" +
-          "overflow:hidden;display:flex;font:600 12px system-ui,sans-serif";
-        el.innerHTML = DATASETS_MENU.map((d) =>
-          `<button type="button" data-ds="${d.key}" style="border:0;background:transparent;` +
-          `padding:6px 10px;cursor:pointer;color:#334155">${d.label}</button>`).join("");
-        el.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
+    return dropdownControl({
+      iconName: "squares-2x2",
+      title: "Flagged Area Type",
+      panelStyle: "padding:4px;min-width:118px;font:600 12px system-ui,sans-serif",
+      render(panel) {
+        panel.innerHTML = DATASETS_MENU.map((d) =>
+          `<button type="button" data-ds="${d.key}" class="ds-row" style="display:block;width:100%;text-align:left;` +
+          `border:0;background:transparent;padding:6px 9px;border-radius:5px;cursor:pointer;color:#334155;white-space:nowrap">${d.label}</button>`).join("");
+        panel.querySelectorAll(".ds-row").forEach((b) => b.addEventListener("click", () => {
+          panel.hidden = true;
           if (b.dataset.ds !== currentDatasetKey) loadDataset(b.dataset.ds, false);
         }));
-        el.addEventListener("click", (e) => e.stopPropagation());
-        datasetControlEl = el;
-        highlightDataset();
-        return el;
       },
-      onRemove() { datasetControlEl = null; },
-    };
+      onReady(container) { datasetControlEl = container; highlightDataset(); },
+    });
   }
 
   function updateContextControlsVisibility() {
     if (contextControlEl) contextControlEl.style.display = currentDatasetKey === "basins" ? "" : "none";
   }
 
+  // Selected-basin context: streams/districts overlays + zoom-to extent.
   function contextControl() {
-    return {
-      onAdd() {
-        const el = document.createElement("div");
-        el.className = "maplibregl-ctrl";
-        el.style.cssText = "background:#fff;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.3);" +
-          "padding:6px 9px;font:600 12px system-ui,sans-serif;color:#0f172a";
+    return dropdownControl({
+      iconName: "rectangle-group",
+      title: "Context Layers",
+      panelStyle: "padding:6px 9px;font:600 12px system-ui,sans-serif;color:#0f172a;min-width:118px",
+      render(panel) {
         const head = (t) => `<div style="font-size:10px;color:#64748b;text-transform:uppercase;` +
           `letter-spacing:.04em;margin-bottom:4px">${t}</div>`;
-        el.innerHTML =
+        panel.innerHTML =
           head("Selected basin") +
           '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;margin-bottom:2px">' +
           '<input type="checkbox" id="ctx-streams" style="accent-color:#22d3ee">Streams</label>' +
@@ -1052,29 +1137,27 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
             `<input type="radio" name="zoomext" value="${v}"${v === "basin" ? " checked" : ""} ` +
             `style="accent-color:#0284c7">${v[0].toUpperCase() + v.slice(1)}</label>`).join("") +
           "</div>";
-        el.querySelector("#ctx-streams").addEventListener("change", (e) => setCtxOn("streams", e.target.checked));
-        el.querySelector("#ctx-districts").addEventListener("change", (e) => setCtxOn("districts", e.target.checked));
-        el.querySelectorAll('input[name="zoomext"]').forEach((rb) => rb.addEventListener("change", () => {
+        panel.querySelector("#ctx-streams").addEventListener("change", (e) => setCtxOn("streams", e.target.checked));
+        panel.querySelector("#ctx-districts").addEventListener("change", (e) => setCtxOn("districts", e.target.checked));
+        panel.querySelectorAll('input[name="zoomext"]').forEach((rb) => rb.addEventListener("change", () => {
           if (!rb.checked) return;
           zoomExtent = rb.value;
           const f = featureById.get(selectedId);
           if (f) zoomToSelection(f);
         }));
-        el.addEventListener("click", (e) => e.stopPropagation());
-        contextControlEl = el;
-        updateContextControlsVisibility();
-        return el;
       },
-      onRemove() { contextControlEl = null; },
-    };
+      onReady(container) { contextControlEl = container; updateContextControlsVisibility(); },
+    });
   }
 
   // ---- Boot -----------------------------------------------------------------
 
   map.once("load", () => {
     map.on("zoomend", onZoomEnd);
-    map.addControl(datasetControl(), "top-left");
-    map.addControl(contextControl(), "top-left");
+    // Three stacked dropdowns in the top-right column.
+    map.addControl(basemapControl(), "top-right");
+    map.addControl(datasetControl(), "top-right");
+    map.addControl(contextControl(), "top-right");
     loadDataset("basins", true);           // interactions bind on first dataset build
   });
 })();
