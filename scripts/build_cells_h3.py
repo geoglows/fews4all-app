@@ -4,8 +4,8 @@ build_cells_h3.py — bin flood points into H3 hexagons at several resolutions.
 
 Reads:  ../Files/Geoglows_<date>.csv, ../Files/Flood_Hub_Global.csv (read directly,
         self-contained like build_basins.py — no shared helper, no intermediate file)
-Writes: ../data_cells.geojson  one GeoJSON FeatureCollection; each feature tagged
-                               with `res`, plus a top-level `resolutions` member
+Writes: ../data_h3cells.geojson  one GeoJSON FeatureCollection; each feature tagged
+                                 with `res`, plus a top-level `resolutions` member
 """
 
 import csv
@@ -20,7 +20,7 @@ FIX_ANTIMERIDIAN = "split"
 HERE = os.path.dirname(os.path.abspath(__file__))   # <repo>/scripts
 ROOT = os.path.dirname(HERE)                        # <repo>
 FILES = os.path.join(ROOT, "Files")
-OUTPUT = os.path.join(ROOT, "data_cells.geojson")
+OUTPUT = os.path.join(ROOT, "data_h3cells.geojson")
 
 GEOGLOWS_CSV = os.path.join(FILES, "Geoglows_2026-07-13-00.csv")
 FLOOD_HUB_CSV = os.path.join(FILES, "Flood_Hub_Global.csv")

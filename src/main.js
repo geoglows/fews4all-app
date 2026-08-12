@@ -85,6 +85,33 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
     pipeline: ["csv_to_json_vgrid.py", "build_cells_h3.py"],
   };
 
+  // ---- Dataset switcher + basin-context state (logic further down) -----------
+  const CDN = "https://cdn.apps.geoglows.org/fews4all/";
+  const DATASETS_MENU = [
+    {key: "basins", label: "Basins", file: "data_basins.geojson"},
+    {key: "h3", label: "H3 cells", file: "data_h3cells.geojson"},
+    {key: "s2", label: "S2 cells", file: "data_s2cells.geojson"},
+  ];
+  let currentDatasetKey = "basins";
+  let datasetControlEl = null;
+  let contextControlEl = null;
+  let interactionsBound = false;      // cell hover/click handlers bound once
+
+  // Streams + districts context — only shown for the basins dataset, only for the
+  // selected basin. `data` is cached once fetched; `on` is the toggle state.
+  const ctx = {
+    streams: {file: "data_basin_streams.geojson", data: null, on: false, loading: false},
+    districts: {file: "data_basin_districts.geojson", data: null, on: false, loading: false},
+  };
+  let selectedBasinId = null;
+  let zoomExtent = "basin";           // basin | river | district
+  // MapLibre zoom sits ~1 below Leaflet, so the "show all tributaries" zoom is a
+  // step lower than the local build's 10.
+  const STREAM_ALL_ZOOM = 9;
+  function streamMinOrder(z) {
+    return z >= STREAM_ALL_ZOOM ? 1 : Math.max(1, STREAM_ALL_ZOOM - Math.floor(z) + 1);
+  }
+
   function unitLabel(props) {
     // Fall back to the per-feature tag if a file predates the `kind` member.
     if (props && props.basin_id && dataset.unit === "Area") return "Basin";
@@ -584,6 +611,8 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
     selectedId = null;
     panelContent.hidden = true;
     panelEmpty.hidden = false;
+    selectedBasinId = null;
+    refreshContext();                 // hide any per-basin context
   }
 
   function selectFeature(id) {
@@ -593,7 +622,9 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
     selectedId = id;
     setFeatureState(selectedId, {selected: true});
     showCell(feature.properties);
-    map.fitBounds(boundsOf([feature]), {maxZoom: 11, padding: 40});
+    selectedBasinId = String(feature.properties.cell_id);
+    refreshContext();                 // reveal this basin's streams/districts (if armed)
+    zoomToSelection(feature);          // frame per the "Zoom to" choice
   }
 
   function bindCellInteractions() {
@@ -719,7 +750,7 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
     updateLabel();
   }
 
-  function buildFromGeojson(geo) {
+  function buildFromGeojson(geo, fit) {
     // Resolve the wording before anything renders — the attribution is baked
     // into the GeoJSON source, so it has to be known before we add it.
     if (geo && DATASETS[geo.kind]) dataset = DATASETS[geo.kind];
@@ -758,12 +789,15 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
     renderModelToggle([...models].sort());
 
     addCellLayers();
-    bindCellInteractions();
-    map.on("zoomend", () => showRes(zoomToRes(map.getZoom())));
+    // Bind hover/click once, now that the fill layer first exists; the layer id is
+    // reused on every dataset switch so the delegated handlers keep working.
+    if (!interactionsBound) { bindCellInteractions(); interactionsBound = true; }
 
     showRes(resolutions[0]);
-    const extent = boundsOf(fcFor(resolutions[0]).features);
-    if (!extent.isEmpty()) map.fitBounds(extent, {padding: 40, maxZoom: 5, duration: 0});
+    if (fit) {
+      const extent = boundsOf(fcFor(resolutions[0]).features);
+      if (!extent.isEmpty()) map.fitBounds(extent, {padding: 40, maxZoom: 5, duration: 0});
+    }
     showRes(zoomToRes(map.getZoom()));
   }
 
@@ -775,15 +809,239 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
       "</p>";
   }
 
-  // data_basins.geojson or data_hexagons.geojson. The style has to finish
-  // loading before we can add the source, so wait on both.
-  Promise.all([
-    fetch("https://cdn.apps.geoglows.org/fews4all/data_basins.geojson").then((r) => {
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      return r.json();
-    }),
-    new Promise((resolve) => map.once("load", resolve)),
-  ])
-    .then(([geo]) => buildFromGeojson(geo))
-    .catch(panelError);
+  // ---- Dataset switching (basins / h3 / s2) ---------------------------------
+
+  function teardown() {
+    clearSelection();
+    setHover(null);
+    tooltip.remove();
+    removeContext();
+    for (const id of [LINE, FILL]) if (map.getLayer(id)) map.removeLayer(id);
+    if (map.getSource(SRC)) map.removeSource(SRC);
+    for (const k in fcByRes) delete fcByRes[k];
+    for (const k in byRes) delete byRes[k];
+    featureById.clear();
+    resolutions = [];
+    currentRes = null;
+  }
+
+  function loadDataset(key, fit) {
+    const ds = DATASETS_MENU.find((d) => d.key === key);
+    if (!ds) return;
+    currentDatasetKey = key;
+    highlightDataset();
+    updateContextControlsVisibility();   // context is basins-only
+    teardown();
+    fetch(CDN + ds.file)
+      .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status + " for " + ds.file); return r.json(); })
+      .then((geo) => buildFromGeojson(geo, fit))
+      .catch(panelError);
+  }
+
+  function onZoomEnd() {
+    showRes(zoomToRes(map.getZoom()));
+    updateStreamsLOD();                  // stream LOD depends on zoom
+  }
+
+  // ---- Basin context: streams + districts (MapLibre sources/layers) ---------
+
+  const ctxSrc = (which) => "ctx-" + which + "-src";
+  const ctxLayers = (which) => which === "streams"
+    ? ["ctx-streams-casing", "ctx-streams-line"]
+    : ["ctx-districts-casing", "ctx-districts-line"];
+
+  function loadCtx(which, cb) {
+    const c = ctx[which];
+    if (c.data) return cb(c.data);
+    if (c.loading) return;
+    c.loading = true;
+    fetch(CDN + c.file)
+      .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then((data) => { c.data = data; c.loading = false; cb(data); })
+      .catch((err) => { c.loading = false; console.warn(which + ":", err.message); cb(null); });
+  }
+
+  // Add the source + layers for a context type once its data is available. Streams
+  // get a dark casing + a bright cyan line (in-basin solid-ish, downstream lighter);
+  // districts get a dark casing + a dashed magenta outline.
+  function ensureCtxLayers(which) {
+    if (currentDatasetKey !== "basins" || map.getSource(ctxSrc(which)) || !ctx[which].data) return;
+    map.addSource(ctxSrc(which), {type: "geojson", data: ctx[which].data});
+    if (which === "streams") {
+      map.addLayer({
+        id: "ctx-streams-casing", type: "line", source: ctxSrc("streams"),
+        layout: {"line-cap": "round"},
+        paint: {"line-color": "#0b1220", "line-width": 5, "line-opacity": 0.85},
+      });
+      map.addLayer({
+        id: "ctx-streams-line", type: "line", source: ctxSrc("streams"),
+        layout: {"line-cap": "round"},
+        paint: {
+          "line-color": ["match", ["get", "reach"], "downstream", "#7dd3fc", "#22d3ee"],
+          "line-width": ["match", ["get", "reach"], "downstream", 2, 2.8],
+          "line-opacity": ["match", ["get", "reach"], "downstream", 0.9, 1],
+        },
+      });
+    } else {
+      map.addLayer({
+        id: "ctx-districts-casing", type: "line", source: ctxSrc("districts"),
+        layout: {"line-cap": "round"},
+        paint: {"line-color": "#0b1220", "line-width": 5, "line-opacity": 0.8},
+      });
+      map.addLayer({
+        id: "ctx-districts-line", type: "line", source: ctxSrc("districts"),
+        paint: {"line-color": "#e879f9", "line-width": 2.5, "line-opacity": 1, "line-dasharray": [2, 1.5]},
+      });
+    }
+  }
+
+  // Show a context type's layers filtered to the selected basin (+ stream LOD),
+  // or hide them when it's off / not a basin view / nothing selected.
+  function updateCtx(which) {
+    const active = ctx[which].on && currentDatasetKey === "basins" && selectedBasinId;
+    if (!active) {
+      ctxLayers(which).forEach((id) => {
+        if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", "none");
+      });
+      return;
+    }
+    ensureCtxLayers(which);
+    const base = ["in", selectedBasinId, ["get", "basins"]];
+    const filter = which === "streams"
+      ? ["all", base, [">=", ["get", "ord"], streamMinOrder(map.getZoom())]]
+      : base;
+    ctxLayers(which).forEach((id) => {
+      if (map.getLayer(id)) {
+        map.setFilter(id, filter);
+        map.setLayoutProperty(id, "visibility", "visible");
+      }
+    });
+  }
+
+  function setCtxOn(which, on) {
+    ctx[which].on = on;
+    if (on) loadCtx(which, (data) => { if (!data) { ctx[which].on = false; return; } updateCtx(which); });
+    else updateCtx(which);
+  }
+
+  function refreshContext() {
+    updateCtx("streams");
+    updateCtx("districts");
+  }
+
+  function updateStreamsLOD() {
+    if (ctx.streams.on) updateCtx("streams");
+  }
+
+  function removeContext() {
+    ["streams", "districts"].forEach((which) => {
+      ctxLayers(which).forEach((id) => { if (map.getLayer(id)) map.removeLayer(id); });
+      if (map.getSource(ctxSrc(which))) map.removeSource(ctxSrc(which));
+    });
+  }
+
+  // ---- Zoom extent: basin / river / district --------------------------------
+
+  function zoomToSelection(feature) {
+    const basinFit = () => map.fitBounds(boundsOf([feature]), {maxZoom: 11, padding: 40});
+    if (zoomExtent === "river") return fitContext("streams", feature, basinFit);
+    if (zoomExtent === "district") return fitContext("districts", feature, basinFit);
+    basinFit();
+  }
+
+  function fitContext(which, feature, fallback) {
+    loadCtx(which, (data) => {
+      if (!data) return fallback();
+      const id = String(feature.properties.cell_id);
+      const feats = data.features.filter((f) => ((f.properties && f.properties.basins) || []).includes(id));
+      if (!feats.length) return fallback();
+      const b = boundsOf(feats);
+      if (b.isEmpty()) return fallback();
+      map.fitBounds(b, {maxZoom: 12, padding: 40});
+    });
+  }
+
+  // ---- Controls: dataset toggle + basin-context panel -----------------------
+
+  function highlightDataset() {
+    if (!datasetControlEl) return;
+    datasetControlEl.querySelectorAll("button").forEach((b) => {
+      const on = b.dataset.ds === currentDatasetKey;
+      b.style.background = on ? "#0284c7" : "transparent";
+      b.style.color = on ? "#fff" : "#334155";
+    });
+  }
+
+  function datasetControl() {
+    return {
+      onAdd() {
+        const el = document.createElement("div");
+        el.className = "maplibregl-ctrl";
+        el.style.cssText = "background:#fff;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.3);" +
+          "overflow:hidden;display:flex;font:600 12px system-ui,sans-serif";
+        el.innerHTML = DATASETS_MENU.map((d) =>
+          `<button type="button" data-ds="${d.key}" style="border:0;background:transparent;` +
+          `padding:6px 10px;cursor:pointer;color:#334155">${d.label}</button>`).join("");
+        el.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
+          if (b.dataset.ds !== currentDatasetKey) loadDataset(b.dataset.ds, false);
+        }));
+        el.addEventListener("click", (e) => e.stopPropagation());
+        datasetControlEl = el;
+        highlightDataset();
+        return el;
+      },
+      onRemove() { datasetControlEl = null; },
+    };
+  }
+
+  function updateContextControlsVisibility() {
+    if (contextControlEl) contextControlEl.style.display = currentDatasetKey === "basins" ? "" : "none";
+  }
+
+  function contextControl() {
+    return {
+      onAdd() {
+        const el = document.createElement("div");
+        el.className = "maplibregl-ctrl";
+        el.style.cssText = "background:#fff;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.3);" +
+          "padding:6px 9px;font:600 12px system-ui,sans-serif;color:#0f172a";
+        const head = (t) => `<div style="font-size:10px;color:#64748b;text-transform:uppercase;` +
+          `letter-spacing:.04em;margin-bottom:4px">${t}</div>`;
+        el.innerHTML =
+          head("Selected basin") +
+          '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;margin-bottom:2px">' +
+          '<input type="checkbox" id="ctx-streams" style="accent-color:#22d3ee">Streams</label>' +
+          '<label style="display:flex;align-items:center;gap:6px;cursor:pointer">' +
+          '<input type="checkbox" id="ctx-districts" style="accent-color:#e879f9">Districts</label>' +
+          '<div style="margin-top:6px">' + head("Zoom to") +
+          ["basin", "river", "district"].map((v, i) =>
+            `<label style="display:flex;align-items:center;gap:6px;cursor:pointer${i < 2 ? ";margin-bottom:2px" : ""}">` +
+            `<input type="radio" name="zoomext" value="${v}"${v === "basin" ? " checked" : ""} ` +
+            `style="accent-color:#0284c7">${v[0].toUpperCase() + v.slice(1)}</label>`).join("") +
+          "</div>";
+        el.querySelector("#ctx-streams").addEventListener("change", (e) => setCtxOn("streams", e.target.checked));
+        el.querySelector("#ctx-districts").addEventListener("change", (e) => setCtxOn("districts", e.target.checked));
+        el.querySelectorAll('input[name="zoomext"]').forEach((rb) => rb.addEventListener("change", () => {
+          if (!rb.checked) return;
+          zoomExtent = rb.value;
+          const f = featureById.get(selectedId);
+          if (f) zoomToSelection(f);
+        }));
+        el.addEventListener("click", (e) => e.stopPropagation());
+        contextControlEl = el;
+        updateContextControlsVisibility();
+        return el;
+      },
+      onRemove() { contextControlEl = null; },
+    };
+  }
+
+  // ---- Boot -----------------------------------------------------------------
+
+  map.once("load", () => {
+    map.on("zoomend", onZoomEnd);
+    map.addControl(datasetControl(), "top-left");
+    map.addControl(contextControl(), "top-left");
+    loadDataset("basins", true);           // interactions bind on first dataset build
+  });
 })();
