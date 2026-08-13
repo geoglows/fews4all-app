@@ -24,6 +24,8 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))  # <repo>/scripts
 ROOT = os.path.dirname(HERE)  # <repo>
 FILES = os.path.join(ROOT, "Files")
+PUBLIC = os.path.join(ROOT, "public")   # the app reads its data from here
+os.makedirs(PUBLIC, exist_ok=True)
 
 MATCHES_CSV = os.path.join(FILES, "global_matches.csv")
 GEOGLOWS_CSV = os.path.join(FILES, "Geoglows_2026-07-13-00.csv")
@@ -31,7 +33,7 @@ FLOOD_HUB_CSV = os.path.join(FILES, "Flood_Hub_Global.csv")
 BASINS_DIR = os.path.join(FILES, "Basins")
 IMPACT_DIR = os.path.join(FILES, "Impact")
 HUC12_PARQUET = os.path.join(BASINS_DIR, "HUC12.parquet")
-OUTPUT = os.path.join(ROOT, "data_basins.geojson")
+OUTPUT = os.path.join(PUBLIC, "data_basins.geojson")
 
 # Impact stats are measured per HUC12 basin; each file is HYBAS_ID + value
 # column(s), with a TOTAL row we skip. (file, {csv column: impact field})

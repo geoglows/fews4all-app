@@ -31,9 +31,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))   # <repo>/scripts
 ROOT = os.path.dirname(HERE)                        # <repo>
 FILES = os.path.join(ROOT, "Files")
 
-BASINS_FILE = os.path.join(ROOT, "data_basins.geojson")
-OUT_STREAMS = os.path.join(ROOT, "data_basin_streams.geojson")
-OUT_DISTRICTS = os.path.join(ROOT, "data_basin_districts.geojson")
+PUBLIC = os.path.join(ROOT, "public")   # the app reads its data from here
+os.makedirs(PUBLIC, exist_ok=True)
+BASINS_FILE = os.path.join(PUBLIC, "data_basins.geojson")   # input, from build_basins.py
+OUT_STREAMS = os.path.join(PUBLIC, "data_basin_streams.geojson")
+OUT_DISTRICTS = os.path.join(PUBLIC, "data_basin_districts.geojson")
 
 _rivers = glob.glob(os.path.join(FILES, "HydroRIVERS_v10_shp", "**", "HydroRIVERS_v10.shp"),
                     recursive=True)

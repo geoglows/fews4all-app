@@ -21,7 +21,9 @@ FIX_ANTIMERIDIAN = "split"
 HERE = os.path.dirname(os.path.abspath(__file__))   # <repo>/scripts
 ROOT = os.path.dirname(HERE)                        # <repo>
 FILES = os.path.join(ROOT, "Files")
-OUTPUT = os.path.join(ROOT, "data_s2cells.geojson")
+PUBLIC = os.path.join(ROOT, "public")   # the app reads its data from here
+os.makedirs(PUBLIC, exist_ok=True)
+OUTPUT = os.path.join(PUBLIC, "data_s2cells.geojson")
 
 GEOGLOWS_CSV = os.path.join(FILES, "Geoglows_2026-07-13-00.csv")
 FLOOD_HUB_CSV = os.path.join(FILES, "Flood_Hub_Global.csv")

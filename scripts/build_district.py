@@ -31,7 +31,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))   # <repo>/scripts
 ROOT = os.path.dirname(HERE)                        # <repo>
 FILES = os.path.join(ROOT, "Files")
 BOUNDARIES = os.path.join(FILES, "International_boundaries")
-OUTPUT = os.path.join(ROOT, "data_districts.geojson")
+PUBLIC = os.path.join(ROOT, "public")   # the app reads its data from here
+os.makedirs(PUBLIC, exist_ok=True)
+OUTPUT = os.path.join(PUBLIC, "data_districts.geojson")
 
 GEOGLOWS_CSV = os.path.join(FILES, "Geoglows_2026-07-13-00.csv")
 FLOOD_HUB_CSV = os.path.join(FILES, "Flood_Hub_Global.csv")

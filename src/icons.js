@@ -3,6 +3,7 @@
 // Add an import here (and a line in ICONS) to use a new one.
 import arrowTopRightOnSquare from "heroicons/24/outline/arrow-top-right-on-square.svg?raw";
 import arrowsRightLeft from "heroicons/24/outline/arrows-right-left.svg?raw";
+import bolt from "heroicons/24/outline/bolt.svg?raw";
 import buildingOffice2 from "heroicons/24/outline/building-office-2.svg?raw";
 import chartBar from "heroicons/24/outline/chart-bar.svg?raw";
 import checkBadge from "heroicons/24/outline/check-badge.svg?raw";
@@ -19,6 +20,7 @@ import users from "heroicons/24/outline/users.svg?raw";
 const ICONS = {
   "arrow-top-right-on-square": arrowTopRightOnSquare,
   "arrows-right-left": arrowsRightLeft,
+  "bolt": bolt,
   "building-office-2": buildingOffice2,
   "chart-bar": chartBar,
   "check-badge": checkBadge,

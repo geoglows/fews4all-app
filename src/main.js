@@ -10,6 +10,7 @@ import {AttributionControl, LngLatBounds, Map as MapLibreMap, NavigationControl,
 // MapLibre a worker URL that Vite actually emits.
 import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
+import {DATA} from "./sources.js"; // central data-source hub (public/ files)
 
 (function () {
   "use strict";
@@ -57,7 +58,6 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
       attribution: "HydroBASINS",
       emptyTitle: "No basin selected",
       emptyBody: "Click a highlighted basin on the map to see every forecast inside it.",
-      pipeline: ["csv_to_json_basins.py", "build_basins.py"],
     },
     "h3-telescoping": {
       unit: "Cell",
@@ -65,7 +65,6 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
       attribution: "Grid: H3 (Uber H3)",
       emptyTitle: "No cell selected",
       emptyBody: "Click a highlighted grid cell on the map to see every forecast inside it.",
-      pipeline: ["csv_to_json_vgrid.py", "build_cells_h3.py"],
     },
     "s2-telescoping": {
       unit: "Cell",
@@ -73,7 +72,10 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
       attribution: "Grid: S2 (Google S2)",
       emptyTitle: "No cell selected",
       emptyBody: "Click a highlighted grid cell on the map to see every forecast inside it.",
-      pipeline: ["csv_to_json_vgrid.py", "build_cells_s2.py"],
+      // S2 cells are much coarser per level than H3, so the uniform start/step
+      // (which would only reach level 8 at zoom ~14) leaves huge cells filling
+      // the screen. Map each level to the zoom where its cells read well.
+      zoomByRes: {2: 0, 3: 1, 4: 2, 5: 3, 6: 4, 7: 5, 8: 6},
     },
   };
 
@@ -82,15 +84,14 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
     unit: "Area", resLabel: "Level", attribution: "",
     emptyTitle: "No area selected",
     emptyBody: "Click a highlighted area on the map to see every forecast inside it.",
-    pipeline: ["csv_to_json_vgrid.py", "build_cells_h3.py"],
   };
 
   // ---- Dataset switcher + basin-context state (logic further down) -----------
-  const CDN = "https://cdn.apps.geoglows.org/fews4all/";
+  // Data URLs come from the source hub in sources.js (see DATA import above).
   const DATASETS_MENU = [
-    {key: "basins", label: "Basins", file: "data_basins.geojson"},
-    {key: "h3", label: "H3 cells", file: "data_h3cells.geojson"},
-    {key: "s2", label: "S2 cells", file: "data_s2cells.geojson"},
+    {key: "basins", label: "Basins", url: DATA.basins},
+    {key: "h3", label: "H3 cells", url: DATA.h3},
+    {key: "s2", label: "S2 cells", url: DATA.s2},
   ];
   let currentDatasetKey = "basins";
   let datasetControlEl = null;
@@ -100,8 +101,8 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
   // Streams + districts context — only shown for the basins dataset, only for the
   // selected basin. `data` is cached once fetched; `on` is the toggle state.
   const ctx = {
-    streams: {file: "data_basin_streams.geojson", data: null, on: false, loading: false},
-    districts: {file: "data_basin_districts.geojson", data: null, on: false, loading: false},
+    streams: {url: DATA.streams, data: null, on: false, loading: false},
+    districts: {url: DATA.districts, data: null, on: false, loading: false},
   };
   let selectedBasinId = null;
   let zoomExtent = "basin";           // basin | river | district
@@ -113,14 +114,33 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
   }
 
   // Flood Hub flash-flood polygons — a global overlay (available in every dataset
-  // view) toggled from the Flood Hub tile in the side panel. Two polygon types:
-  // "highly_likely" and "likely".
+  // view) toggled from the "Flash Floods" section at the bottom of the side panel.
+  // Two polygon types: "highly_likely" and "likely".
   let flashOn = false;
   let flashData = null;
   let flashLoading = false;
   const FLASH_SRC = "flash-src";
   const FLASH_FILL = "flash-fill";
   const FLASH_LAYERS = [FLASH_FILL, "flash-line-high", "flash-line-likely"];
+
+  // Flash-flood models listed in the panel's "Flash Floods" dropdown. Only Flood
+  // Hub exists today; adding a model here (with its own layer/toggle wiring)
+  // extends the list. `legend` describes the polygon types the model draws, and
+  // matches the on-map styling (fill + outline, dashed for the lower tier).
+  const FLASH_MODELS = [
+    {
+      key: "flood_hub",
+      label: "Flood Hub",
+      legend: [
+        {type: "likely", label: "Likely", fill: "#a78bfa", outline: "#7c3aed", dashed: true},
+        {type: "highly_likely", label: "Highly likely", fill: "#6d28d9", outline: "#4c1d95", dashed: false},
+      ],
+    },
+  ];
+  // polygon_type -> its legend entry, so a hovered flash polygon can show the
+  // matching legend attribute in a tooltip.
+  const FLASH_LEGEND_BY_TYPE = {};
+  FLASH_MODELS.forEach((fm) => fm.legend.forEach((L) => { FLASH_LEGEND_BY_TYPE[L.type] = L; }));
 
   function unitLabel(props) {
     // Fall back to the per-feature tag if a file predates the `kind` member.
@@ -412,7 +432,7 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
 
   // The panel always lists both models. A model shows a full card when the selected
   // feature carries its forecast, otherwise a shrunken "standby" card (name linked to
-  // its own app). The Flood Hub tile always carries the flash-flood polygon toggle.
+  // its own app). Flash-flood toggles live in their own section near the bottom.
   function renderPanel(props) {
     panelEmpty.hidden = true;
     panelContent.hidden = false;
@@ -428,10 +448,6 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
          class="inline-flex items-center gap-1 text-sky-300 hover:text-sky-200 hover:underline">${label}${
         icon("arrow-top-right-on-square", "text-[11px] opacity-80")}</a>`;
     }
-    const flashToggle =
-      `<label class="flex items-center gap-1.5 text-[11px] font-medium text-slate-300 cursor-pointer select-none shrink-0" title="Toggle Flood Hub flash-flood polygons">` +
-      `<input type="checkbox" id="flash-toggle" class="accent-violet-500 w-3.5 h-3.5"${flashOn ? " checked" : ""}>Flash floods</label>`;
-
     function modelTile(m) {
       const fcs = selected ? props.forecasts.filter((f) => f.model === m) : [];
       const has = fcs.length > 0;
@@ -439,7 +455,7 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
         `<div class="flex items-center justify-between gap-2 mb-1.5">` +
         `<span class="flex items-center gap-1.5 font-semibold text-[13px] capitalize ${has ? "text-slate-100" : "text-slate-400"}">` +
         icon("chart-bar", has ? "text-sky-300" : "text-slate-500") + modelTitle(m, fcs[0]) + `</span>` +
-        (m === "flood_hub" ? flashToggle : "") + `</div>`;
+        `</div>`;
       if (!has) {
         return `<div class="bg-[#141e2a] border border-slate-700/60 rounded-[10px] px-3.5 py-2.5 mb-3">` + head +
           `<div class="text-slate-500 text-[11px]">On standby — ${selected ? "no forecast for this area" : "no area selected"}.</div></div>`;
@@ -496,10 +512,45 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
         `</div><p class="text-slate-400 text-[10px] mt-1.5">Totals across the whole basin.</p></div>`
       : "";
 
-    panelContent.innerHTML = head + tiles + impactHtml;
+    // Flash Floods: a global overlay independent of the selected feature, so it
+    // renders in every panel state. A dropdown lists the flash-flood models; each
+    // toggle reveals a legend for its polygon types when switched on.
+    const flashOnFor = (key) => key === "flood_hub" && flashOn;
+    const flashRow = (fm) => {
+      const on = flashOnFor(fm.key);
+      const legend = fm.legend.map((L) =>
+        `<div class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-[3px] shrink-0" ` +
+        `style="background:${L.fill};border:1.5px ${L.dashed ? "dashed" : "solid"} ${L.outline}"></span>${L.label}</div>`
+      ).join("");
+      return `<label class="flex items-center gap-2 text-[12.5px] font-medium text-slate-700 cursor-pointer select-none py-0.5">` +
+        `<input type="checkbox" id="flash-toggle-${fm.key}" class="accent-violet-600 w-3.5 h-3.5"${on ? " checked" : ""}>${fm.label}</label>` +
+        `<div id="flash-legend-${fm.key}" class="mt-1 mb-1.5 ml-6 flex flex-col gap-1 text-[11px] text-slate-500${on ? "" : " hidden"}">${legend}</div>`;
+    };
+    const flashOpen = FLASH_MODELS.some((fm) => flashOnFor(fm.key));   // open if a model is active
+    const flashHtml =
+      `<div class="mt-4 pt-3 border-t border-slate-200">` +
+      `<h3 class="flex items-center gap-1.5 text-slate-800 font-semibold text-[11px] uppercase tracking-wider mb-2">` +
+      `${icon("bolt", "text-violet-500 text-sm")}Flash Floods</h3>` +
+      `<details class="group rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2"${flashOpen ? " open" : ""}>` +
+      `<summary class="flex items-center justify-between gap-2 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden ` +
+      `text-[10px] font-semibold uppercase tracking-wide text-slate-400">` +
+      `<span>Models</span>${icon("chevron-down", "text-[12px] transition-transform group-open:rotate-180")}</summary>` +
+      `<div class="mt-2">${FLASH_MODELS.map(flashRow).join("")}</div>` +
+      `</details></div>`;
 
-    const cb = document.getElementById("flash-toggle");
-    if (cb) cb.addEventListener("change", () => setFlashOn(cb.checked));
+    panelContent.innerHTML = head + tiles + impactHtml + flashHtml;
+
+    // Wire each model's toggle: flip its overlay and show/hide its legend.
+    const flashSetter = {flood_hub: setFlashOn};
+    FLASH_MODELS.forEach((fm) => {
+      const cb = document.getElementById(`flash-toggle-${fm.key}`);
+      if (!cb) return;
+      cb.addEventListener("change", () => {
+        (flashSetter[fm.key] || (() => {}))(cb.checked);
+        const lg = document.getElementById(`flash-legend-${fm.key}`);
+        if (lg) lg.classList.toggle("hidden", !cb.checked);
+      });
+    });
   }
 
   let resolutions = [];
@@ -692,6 +743,8 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
       if (!f) return;
       map.getCanvas().style.cursor = "pointer";
       setHover(f.id);
+      // Where a flash polygon overlaps, its tooltip takes precedence.
+      if (flashUnderCursor(e.point)) return;
       tooltip.setLngLat(e.lngLat).setHTML(tooltipHtml(featureById.get(f.id).properties)).addTo(map);
     });
     map.on("mouseleave", FILL, () => {
@@ -699,12 +752,18 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
       setHover(null);
       tooltip.remove();
     });
-    // One handler for both cases: a hit selects, a miss clears — which also
-    // covers "click the basemap to deselect".
+    // Only the finest telescoping level carries statistics. Clicking a finer
+    // cell opens its panel; clicking a coarser cell drills in (zooms to its
+    // extent to reveal the next level up); clicking the basemap deselects.
     map.on("click", (e) => {
+      // A flash polygon under the cursor handles its own click (fit-to-screen);
+      // don't drill cells or deselect underneath it.
+      if (flashUnderCursor(e.point)) return;
       const hits = map.queryRenderedFeatures(e.point, {layers: [FILL]});
-      if (hits.length) selectFeature(hits[0].id);
-      else clearSelection();
+      const f = hits.length ? featureById.get(hits[0].id) : null;
+      if (!f) { clearSelection(); return; }
+      if (Number(f.properties.res) === Number(finestRes())) selectFeature(hits[0].id);
+      else drillInto(f);
     });
   }
 
@@ -722,12 +781,38 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
     return fcByRes[res];
   }
 
+  // resolutions is sorted ascending, so the last entry is the finest level.
+  const finestRes = () => (resolutions.length ? resolutions[resolutions.length - 1] : null);
+
+  // The minimum zoom at which a resolution appears. A dataset can override the
+  // per-level thresholds (see DATASETS.zoomByRes); otherwise every level steps
+  // up uniformly from RES_START_ZOOM.
+  function resZoomThreshold(res, index) {
+    return dataset.zoomByRes && dataset.zoomByRes[res] != null
+      ? dataset.zoomByRes[res]
+      : RES_START_ZOOM + index * RES_ZOOM_STEP;
+  }
+
   function zoomToRes(zoom) {
     let chosen = resolutions[0];
     resolutions.forEach((r, i) => {
-      if (zoom >= RES_START_ZOOM + i * RES_ZOOM_STEP) chosen = r;
+      if (zoom >= resZoomThreshold(r, i)) chosen = r;
     });
     return chosen;
+  }
+
+  // Clicking a coarser (non-finest) cell drills in: zoom to that cell's extent,
+  // and at least to the next level's threshold, so the finer cells inside it
+  // come into view. The normal zoom-driven telescoping then takes over.
+  function drillInto(feature) {
+    const b = boundsOf([feature]);
+    if (b.isEmpty()) return;
+    const i = resolutions.indexOf(Number(feature.properties.res));
+    const next = (i >= 0 && i < resolutions.length - 1) ? resolutions[i + 1] : null;
+    const cam = map.cameraForBounds(b, {padding: 40});
+    let zoom = cam ? cam.zoom : map.getZoom();
+    if (next != null) zoom = Math.max(zoom, resZoomThreshold(next, i + 1) + 0.05);
+    map.easeTo({center: cam ? cam.center : b.getCenter(), zoom, duration: 600});
   }
 
   let currentRes = null;
@@ -881,7 +966,7 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
     if (flashData) return cb(flashData);
     if (flashLoading) return;
     flashLoading = true;
-    fetch(CDN + "data_flash_floods.geojson")
+    fetch(DATA.flash)
       .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
       .then((data) => { flashData = data; flashLoading = false; cb(data); })
       .catch((err) => { flashLoading = false; console.warn("flash floods:", err.message); cb(null); });
@@ -910,6 +995,50 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
       filter: ["==", ["get", "polygon_type"], "likely"],
       paint: {"line-color": "#7c3aed", "line-width": 1.1, "line-opacity": 0.9, "line-dasharray": [2, 1.5]},
     });
+    bindFlashInteractions();
+  }
+
+  // Hover a flash-flood polygon to see its legend attribute ("Likely" /
+  // "Highly likely"), colored to match the on-map fill. Reuses the shared cell
+  // tooltip; the cell handler yields to flash where the two overlap.
+  function flashTooltipHtml(p) {
+    const L = FLASH_LEGEND_BY_TYPE[p.polygon_type] ||
+      {label: p.polygon_type || "Flash flood", fill: "#7c3aed"};
+    return `<span style="display:inline-flex;align-items:center;gap:6px">` +
+      `<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${L.fill}"></span>` +
+      `Flash flood · <b>${L.label}</b></span>`;
+  }
+
+  let flashInteractionsBound = false;
+  function bindFlashInteractions() {
+    if (flashInteractionsBound) return;
+    flashInteractionsBound = true;
+    map.on("mousemove", FLASH_FILL, (e) => {
+      const f = e.features[0];
+      if (!f) return;
+      map.getCanvas().style.cursor = "pointer";
+      tooltip.setLngLat(e.lngLat).setHTML(flashTooltipHtml(f.properties)).addTo(map);
+    });
+    map.on("mouseleave", FLASH_FILL, () => {
+      map.getCanvas().style.cursor = "";
+      tooltip.remove();
+    });
+    // Click a flash polygon to frame it on screen. Prefer the full source
+    // geometry, since rendered features can be clipped at tile edges.
+    map.on("click", FLASH_FILL, (e) => {
+      const hit = e.features && e.features[0];
+      if (!hit) return;
+      const src = flashData && flashData.features.find(
+        (x) => x.properties.polygonId === hit.properties.polygonId);
+      const b = boundsOf([src || hit]);
+      if (!b.isEmpty()) map.fitBounds(b, {padding: 60, maxZoom: 12, duration: 600});
+    });
+  }
+
+  // True when a visible flash polygon sits under the cursor (flash wins the tooltip).
+  function flashUnderCursor(point) {
+    return flashOn && map.getLayer(FLASH_FILL) &&
+      map.queryRenderedFeatures(point, {layers: [FLASH_FILL]}).length > 0;
   }
 
   function setFlashOn(on) {
@@ -919,7 +1048,14 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
       return;
     }
     loadFlash((data) => {
-      if (!data) { flashOn = false; const cb = document.getElementById("flash-toggle"); if (cb) cb.checked = false; return; }
+      if (!data) {
+        flashOn = false;
+        const cb = document.getElementById("flash-toggle-flood_hub");
+        if (cb) cb.checked = false;
+        const lg = document.getElementById("flash-legend-flood_hub");
+        if (lg) lg.classList.add("hidden");
+        return;
+      }
       ensureFlashLayers();
       FLASH_LAYERS.forEach((id) => { if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", "visible"); });
     });
@@ -953,8 +1089,8 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
     highlightDataset();
     updateContextControlsVisibility();   // context is basins-only
     teardown();
-    fetch(CDN + ds.file)
-      .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status + " for " + ds.file); return r.json(); })
+    fetch(ds.url)
+      .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status + " for " + ds.url); return r.json(); })
       .then((geo) => buildFromGeojson(geo, fit))
       .catch(panelError);
   }
@@ -976,7 +1112,7 @@ import {icon} from "./icons.js"; // heroicons, inlined as SVG at build time
     if (c.data) return cb(c.data);
     if (c.loading) return;
     c.loading = true;
-    fetch(CDN + c.file)
+    fetch(c.url)
       .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
       .then((data) => { c.data = data; c.loading = false; cb(data); })
       .catch((err) => { c.loading = false; console.warn(which + ":", err.message); cb(null); });
